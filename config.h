@@ -35,4 +35,7 @@ void destroy_config_info();
 
 void print_config_info();
 
+extern char *SERVER_PORT;
+extern char *CLIENT_PORT;
+
 #endif /* CONFIG_H_*/

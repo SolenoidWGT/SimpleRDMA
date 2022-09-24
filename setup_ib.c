@@ -157,8 +157,7 @@ int connect_qp_client()
 
     for (i = 0; i < num_peers; i++)
     {
-        peer_sockfd[i] = sock_create_connect(config_info.servers[i],
-                                             config_info.sock_port);
+        peer_sockfd[i] = sock_create_connect(config_info.servers[i], SERVER_PORT);
         check(peer_sockfd[i] > 0, "Failed to create peer_sockfd[%d]", i);
     }
 

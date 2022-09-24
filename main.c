@@ -10,6 +10,9 @@
 
 FILE *log_fp = NULL;
 
+char *SERVER_PORT = "12345";
+char *CLIENT_PORT = "12346";
+
 int init_env();
 void destroy_env();
 
@@ -29,7 +32,6 @@ int main(int argc, char *argv[])
     config_info.is_server = (bool)atoi(argv[1]);
     config_info.msg_size = 16;
     config_info.num_concurr_msgs = 8;
-    config_info.sock_port = argv[2];
     config_info.num_servers = 1;
     config_info.num_clients = 1;
 
@@ -39,6 +41,11 @@ int main(int argc, char *argv[])
     config_info.clients[0] = (char *)malloc(128);
     sprintf(config_info.servers[0], "%s", argv[3]);
     sprintf(config_info.clients[0], "%s", argv[4]);
+
+    if (config_info.is_server)
+        config_info.sock_port = SERVER_PORT;
+    else
+        config_info.sock_port = CLIENT_PORT;
 
     config_info.rank = 0;
     ret = init_env();
