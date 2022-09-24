@@ -325,7 +325,7 @@ int setup_ib()
 
     /* create cq */
     log("ib_res.dev_attr.max_cqe is %d", ib_res.dev_attr.max_cqe);
-    ib_res.cq = ibv_create_cq(ib_res.ctx, 128,
+    ib_res.cq = ibv_create_cq(ib_res.ctx, 2048,
                               NULL, NULL, 0);
     check(ib_res.cq != NULL, "Failed to create cq");
 
@@ -338,21 +338,18 @@ int setup_ib()
     ib_res.srq = ibv_create_srq(ib_res.pd, &srq_init_attr);
 
     /* create qp */
-    struct ibv_qp_init_attr qp_init_attr = {
-        .send_cq = ib_res.cq,
-        .recv_cq = ib_res.cq,
-        .srq = ib_res.srq,
-        .cap = {
-            .max_send_wr = ib_res.dev_attr.max_qp_wr,
-            .max_recv_wr = ib_res.dev_attr.max_qp_wr,
-            .max_send_sge = 1,
-            .max_recv_sge = 1,
-        },
-        .qp_type = IBV_QPT_RC,
-    };
+    struct ibv_qp_init_attr qp_init_attr;
+    memset(&qp_init_attr, 0, sizeof(struct ibv_qp_init_attr));
+    qp_init_attr.qp_type = IBV_QPT_RC;
+    qp_init_attr.send_cq = ib_res.cq,
+    qp_init_attr.recv_cq = ib_res.cq,
+    qp_init_attr.srq = ib_res.srq,
+    qp_init_attr.cap.max_send_wr = 1024,
+    qp_init_attr.cap.max_recv_wr = 1024,
+    qp_init_attr.cap.max_send_sge = 1,
+    qp_init_attr.cap.max_recv_sge = 1,
 
-    ib_res.qp = (struct ibv_qp **)calloc(ib_res.num_qps,
-                                         sizeof(struct ibv_qp *));
+    ib_res.qp = (struct ibv_qp **)calloc(ib_res.num_qps, sizeof(struct ibv_qp *));
     log("XXXXXXXXXXXXXXXXXXXX ibv_create_qp XXXXXXXXXXXXXXXXXXXX\n");
     check(ib_res.qp != NULL, "Failed to allocate qp");
     // log("num qpes %d", ib_res.num_qps);

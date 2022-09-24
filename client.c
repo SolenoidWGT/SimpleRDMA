@@ -46,7 +46,7 @@ void *client_thread_func (void *arg)
     CPU_SET  ((int)thread_id, &cpuset);
     self = pthread_self ();
     ret  = pthread_setaffinity_np (self, sizeof(cpu_set_t), &cpuset);
-    check (ret == 0, "thread[%ld]: failed to set thread affinity", thread_id);
+    check (ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
 
     /* pre-post recvs */    
     wc = (struct ibv_wc *) calloc (num_wc, sizeof(struct ibv_wc));

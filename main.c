@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
     // ret = parse_config_file(argv[1]);
     // check(ret == 0, "Failed to parse config file");
 
-    config_info.is_server = (bool)argv[1];
+    config_info.is_server = (bool)atoi(argv[1]);
     config_info.msg_size = 16;
     config_info.num_concurr_msgs = 8;
     config_info.sock_port = argv[2];
