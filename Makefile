@@ -7,11 +7,12 @@ LIBS=-pthread -lrdmacm
 SRCS=main.c client.c config.c ib.c server.c setup_ib.c sock.c
 OBJS=$(SRCS:.c=.o)
 PROG=rdma-tutorial
+PROG2=test_mlock
 
-all: $(PROG)
+all: $(PROG) $(PROG2)
 
 debug: CFLAGS=-Wall -Werror -g -DDEBUG
-debug: $(PROG)
+debug: $(PROG) $(PROG2)
 
 .c.o:
 	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<
@@ -19,5 +20,8 @@ debug: $(PROG)
 $(PROG): $(OBJS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $(OBJS) $(LDFLAGS) $(LIBS)
 
+$(PROG2): 
+	$(CC) $(CFLAGS) -o $@ test_mlock.cc
+
 clean:
-	$(RM) *.o *~ $(PROG)
+	$(RM) *.o *~ $(PROG) $(PROG2)
