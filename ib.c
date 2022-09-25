@@ -10,61 +10,48 @@ int modify_qp_to_rts(struct ibv_qp *qp, uint32_t target_qp_num, uint16_t target_
 
 	/* change QP state to INIT */
 	{
-		struct ibv_qp_attr qp_attr = {
-			.qp_state = IBV_QPS_INIT,
-			.pkey_index = 0,
-			.port_num = IB_PORT,
-			.qp_access_flags = IBV_ACCESS_LOCAL_WRITE |
-							   IBV_ACCESS_REMOTE_READ |
-							   IBV_ACCESS_REMOTE_ATOMIC |
-							   IBV_ACCESS_REMOTE_WRITE,
-		};
-
-		ret = ibv_modify_qp(qp, &qp_attr,
-							IBV_QP_STATE | IBV_QP_PKEY_INDEX |
-								IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
+		struct ibv_qp_attr qp_attr;
+		memset(&qp_attr, 0 ,sizeof(struct ibv_qp_attr));
+		qp_attr.qp_state = IBV_QPS_INIT,
+		qp_attr.pkey_index = 0,
+		qp_attr.port_num = IB_PORT,
+		qp_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE;
+		// , IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS
+		ret = ibv_modify_qp(qp, &qp_attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
 		check(ret == 0, "Failed to modify qp to INIT.");
 	}
 
 	/* Change QP state to RTR */
 	{
-		struct ibv_qp_attr qp_attr = {
-			.qp_state = IBV_QPS_RTR,
-			.path_mtu = IB_MTU,
-			.dest_qp_num = target_qp_num,
-			.rq_psn = 0,
-			.max_dest_rd_atomic = 1,
-			.min_rnr_timer = 12,
-			.ah_attr.is_global = 0,
-			.ah_attr.dlid = target_lid,
-			.ah_attr.sl = IB_SL,
-			.ah_attr.src_path_bits = 0,
-			.ah_attr.port_num = IB_PORT,
-		};
-
-		ret = ibv_modify_qp(qp, &qp_attr,
-							IBV_QP_STATE | IBV_QP_AV |
-								IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-								IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC |
-								IBV_QP_MIN_RNR_TIMER);
+		struct ibv_qp_attr qp_attr;
+		memset(&qp_attr, 0 ,sizeof(struct ibv_qp_attr));
+		qp_attr.qp_state = IBV_QPS_RTR;
+		qp_attr.path_mtu = IB_MTU;
+		qp_attr.dest_qp_num = target_qp_num;
+		qp_attr.rq_psn = 0;
+		qp_attr.max_dest_rd_atomic = 1;
+		qp_attr.min_rnr_timer = 12;
+		qp_attr.ah_attr.is_global = 0;
+		qp_attr.ah_attr.dlid = target_lid;
+		qp_attr.ah_attr.sl = IB_SL;
+		qp_attr.ah_attr.src_path_bits = 0;
+		qp_attr.ah_attr.port_num = IB_PORT;
+		ret = ibv_modify_qp(qp, &qp_attr, IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
 		check(ret == 0, "Failed to change qp to rtr.");
 	}
 
 	/* Change QP state to RTS */
 	{
-		struct ibv_qp_attr qp_attr = {
-			.qp_state = IBV_QPS_RTS,
-			.timeout = 14,
-			.retry_cnt = 7,
-			.rnr_retry = 7,
-			.sq_psn = 0,
-			.max_rd_atomic = 1,
-		};
-
-		ret = ibv_modify_qp(qp, &qp_attr,
-							IBV_QP_STATE | IBV_QP_TIMEOUT |
-								IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
-								IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC);
+		struct ibv_qp_attr qp_attr;
+		memset(&qp_attr, 0 ,sizeof(struct ibv_qp_attr));
+		qp_attr.qp_state = IBV_QPS_RTS;
+		// qp_attr.cur_qp_state = IBV_QPS_RESET;
+		qp_attr.timeout = 14;
+		qp_attr.retry_cnt = 7;
+		qp_attr.rnr_retry = 12;
+		qp_attr.sq_psn = 0;
+		qp_attr.max_rd_atomic = 1;
+		ret = ibv_modify_qp(qp, &qp_attr, IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC);
 		check(ret == 0, "Failed to modify qp to RTS.");
 	}
 

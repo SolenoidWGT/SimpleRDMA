@@ -378,13 +378,16 @@ int setup_ib()
     struct ibv_qp_init_attr qp_init_attr;
     memset(&qp_init_attr, 0, sizeof(struct ibv_qp_init_attr));
     qp_init_attr.qp_type = IBV_QPT_RC;
-    qp_init_attr.send_cq = ib_res.cq,
-    qp_init_attr.recv_cq = ib_res.cq,
-    qp_init_attr.srq = ib_res.srq,
-    qp_init_attr.cap.max_send_wr = 1024,
-    qp_init_attr.cap.max_recv_wr = 1024,
-    qp_init_attr.cap.max_send_sge = 1,
-    qp_init_attr.cap.max_recv_sge = 1,
+    qp_init_attr.send_cq = ib_res.cq;
+    qp_init_attr.recv_cq = ib_res.cq;
+    qp_init_attr.srq = ib_res.srq;
+    qp_init_attr.cap.max_send_wr = 128;
+    qp_init_attr.cap.max_recv_wr = 64;
+    qp_init_attr.cap.max_send_sge = 4;
+    qp_init_attr.cap.max_recv_sge = 1;
+    qp_init_attr.cap.max_inline_data = 60;
+    qp_init_attr.xrc_domain = NULL;
+    qp_init_attr.sq_sig_all = 0;
 
     ib_res.qp = (struct ibv_qp **)calloc(ib_res.num_qps, sizeof(struct ibv_qp *));
     log("XXXXXXXXXXXXXXXXXXXX ibv_create_qp XXXXXXXXXXXXXXXXXXXX\n");

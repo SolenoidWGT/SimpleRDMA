@@ -1,5 +1,8 @@
+#define _GNU_SOURCE         /* See feature_test_macros(7) */
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <dlfcn.h>
 
 #include "debug.h"
 #include "config.h"
@@ -15,6 +18,8 @@ char *CLIENT_PORT = "12346";
 
 int init_env();
 void destroy_env();
+
+struct ibv_mr * (*ibv_internal_reg_mr_iova2)(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access);
 
 int main(int argc, char *argv[])
 {
@@ -65,6 +70,7 @@ int main(int argc, char *argv[])
     check(ret == 0, "Failed to run workload");
 
 error:
+    // if (ibvhandle != NULL) dlclose(ibvhandle);
     close_ib_connection();
     destroy_env();
     return ret;
