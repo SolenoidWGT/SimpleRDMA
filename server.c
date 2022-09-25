@@ -17,7 +17,7 @@ void *server_thread(void *arg)
     int msg_size = config_info.msg_size;
     int num_peers = ib_res.num_qps;
 
-    pthread_t self;
+    //pthread_t self;
     cpu_set_t cpuset;
 
     int num_wc = 20;
@@ -46,9 +46,9 @@ void *server_thread(void *arg)
     /* set thread affinity */
     CPU_ZERO(&cpuset);
     CPU_SET((int)thread_id, &cpuset);
-    self = pthread_self();
-    ret = pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
-    check(ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
+    // self = pthread_self();
+    // ret = pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
+    // check(ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
 
     /* pre-post recvs */
     wc = (struct ibv_wc *)calloc(num_wc, sizeof(struct ibv_wc));
@@ -130,21 +130,28 @@ void *server_thread(void *arg)
                 imm_data = ntohl(wc[i].imm_data);
                 char *msg_ptr = (char *)wc[i].wr_id;
 
-                if (imm_data == MSG_CTL_STOP)
-                {
-                    num_acked_peers += 1;
-                    if (num_acked_peers == num_peers)
-                    {
-                        gettimeofday(&end, NULL);
-                        stop = true;
-                        break;
-                    }
-                }
-                else
-                    /* echo the message back */
-                    post_send(msg_size, lkey, 0, imm_data, qp[imm_data], msg_ptr);
+                // if (imm_data == MSG_CTL_STOP)
+                // {
+                //     num_acked_peers += 1;
+                //     if (num_acked_peers == num_peers)
+                //     {
+                //         gettimeofday(&end, NULL);
+                //         stop = true;
+                //         break;
+                //     }
+                // }
+                
+                /* echo the message back */
+                // post_send(msg_size, lkey, 0, imm_data, qp[imm_data], msg_ptr);
                 /* post a new receive */
                 ret = post_srq_recv(msg_size, lkey, wc[i].wr_id, srq, msg_ptr);
+
+                if (ops_count == num_concurr_msgs)
+                {
+                    gettimeofday(&end, NULL);
+                    stop = true;
+                    break;
+                }
             }
         }
     }
@@ -155,6 +162,7 @@ void *server_thread(void *arg)
         ret = post_send(0, lkey, IB_WR_ID_STOP, MSG_CTL_STOP, qp[i], ib_res.ib_buf);
         check(ret == 0, "thread[%ld]: failed to signal the client to stop", thread_id);
     }
+    log("signal all client to stop");
 
     stop = false;
     while (stop != true)

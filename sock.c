@@ -7,6 +7,7 @@
 
 #include "debug.h"
 #include "sock.h"
+#include "ib.h"
 
 ssize_t sock_read (int sock_fd, void *buffer, size_t len)
 {
@@ -159,6 +160,26 @@ int sock_set_qp_info(int sock_fd, struct QPInfo *qp_info)
     return -1;
 }
 
+int sock_set_mr_info(int sock_fd, struct MRinfo *mr_info)
+{
+    int n;
+    struct MRinfo tmp_mr_info;
+    
+    // Because we are all testing on x86 machines, the endianness requirements 
+    // are relaxed here.
+    tmp_mr_info.addr      = mr_info->addr;
+    tmp_mr_info.length    = mr_info->length;
+    tmp_mr_info.rkey      = mr_info->rkey;
+
+    n = sock_write(sock_fd, (char *)&tmp_mr_info, sizeof(struct MRinfo));
+    check(n==sizeof(struct MRinfo), "write qp_info to socket.");
+
+    return 0;
+
+ error:
+    return -1;
+}
+
 int sock_get_qp_info(int sock_fd, struct QPInfo *qp_info)
 {
     int n;
@@ -170,6 +191,24 @@ int sock_get_qp_info(int sock_fd, struct QPInfo *qp_info)
     qp_info->lid       = ntohs(tmp_qp_info.lid);
     qp_info->qp_num    = ntohl(tmp_qp_info.qp_num);
     qp_info->rank      = ntohl(tmp_qp_info.rank);
+    
+    return 0;
+
+ error:
+    return -1;
+}
+
+int sock_get_MR_info(int sock_fd, struct MRinfo *mr_info)
+{
+    int n;
+    struct MRinfo  tmp_mr_info;
+
+    n = sock_read(sock_fd, (char *)&tmp_mr_info, sizeof(struct MRinfo));
+    check(n==sizeof(struct MRinfo), "read mr_info from socket.");
+
+    mr_info->addr      = tmp_mr_info.addr;
+    mr_info->length    = tmp_mr_info.length;
+    mr_info->rkey      = tmp_mr_info.rkey;
     
     return 0;
 

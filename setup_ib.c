@@ -9,6 +9,7 @@
 #include "setup_ib.h"
 
 struct IBRes ib_res;
+struct MRinfo * server_MRinfo = NULL;
 
 int connect_qp_server()
 {
@@ -75,6 +76,24 @@ int connect_qp_server()
         }
         ret = sock_set_qp_info(peer_sockfd[i], &local_qp_info[peer_ind]);
         check(ret == 0, "Failed to send qp_info to client[%d]", peer_ind);
+    }
+
+    /* send mr_info to client */
+    peer_ind = -1;
+    j = 0;
+    for (i = 0; i < num_peers; i++)
+    {
+        peer_ind = -1;
+        for (j = 0; j < num_peers; j++)
+        {
+            if (remote_qp_info[j].rank == i)
+            {
+                peer_ind = j;
+                break;
+            }
+        }
+        ret = sock_set_mr_info(peer_sockfd[i], &server_MRinfo[peer_ind]);
+        check(ret == 0, "Failed to send mr_info to client[%d]", peer_ind);
     }
 
     /* change send QP state to RTS */
@@ -190,6 +209,18 @@ int connect_qp_client()
         ret = sock_get_qp_info(peer_sockfd[i], &remote_qp_info[i]);
         check(ret == 0, "Failed to get qp_info[%d] from server", i);
     }
+
+    /* get remote mr info from server */
+    server_MRinfo = (struct MRinfo*) calloc(num_peers, sizeof(struct MRinfo));
+    check(server_MRinfo != NULL, "Failed to allocate remote_mr_info");
+    for (i = 0; i < num_peers; i++)
+    {
+        ret = sock_get_MR_info(peer_sockfd[i], &server_MRinfo[i]);
+        check(ret == 0, "Failed to get qp_info[%d] from server", i);
+    }
+    log("Remote server mr info addr:%p, length:%ld, rkey: %d", \
+        server_MRinfo->addr, server_MRinfo->length, server_MRinfo->rkey);
+
 
     /* change QP state to RTS */
     /* send qp_info to client */
@@ -317,6 +348,13 @@ int setup_ib()
                                IBV_ACCESS_REMOTE_WRITE);
     check(ib_res.mr != NULL, "Failed to register mr");
     log("addr %p, length:%ld", ib_res.mr->addr, ib_res.mr->length);
+
+    server_MRinfo = (struct MRinfo*) calloc(config_info.num_clients, sizeof(struct MRinfo));
+    server_MRinfo->addr = ib_res.mr->addr;
+    server_MRinfo->length = ib_res.mr->length;
+    server_MRinfo->rkey = ib_res.mr->rkey;
+    log("Local server mr info addr:%p, length:%ld, rkey: %d", \
+        server_MRinfo->addr, server_MRinfo->length, server_MRinfo->rkey);
 
     /* query IB device attr */
     ret = ibv_query_device(ib_res.ctx, &ib_res.dev_attr);

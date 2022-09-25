@@ -26,4 +26,7 @@ void close_ib_connection ();
 int  connect_qp_server ();
 int  connect_qp_client ();
 
+
+
+
 #endif /*setup_ib.h*/

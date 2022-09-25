@@ -17,7 +17,7 @@ void *client_thread_func(void *arg)
     int num_concurr_msgs = config_info.num_concurr_msgs;
     int num_peers = ib_res.num_qps;
 
-    pthread_t self;
+    // pthread_t self;
     cpu_set_t cpuset;
 
     int num_wc = 20;
@@ -44,9 +44,9 @@ void *client_thread_func(void *arg)
     /* set thread affinity */
     CPU_ZERO(&cpuset);
     CPU_SET((int)thread_id, &cpuset);
-    self = pthread_self();
-    ret = pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
-    check(ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
+    // self = pthread_self();
+    // ret = pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
+    // check(ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
 
     /* pre-post recvs */
     wc = (struct ibv_wc *)calloc(num_wc, sizeof(struct ibv_wc));
@@ -104,7 +104,7 @@ void *client_thread_func(void *arg)
     {
         for (j = 0; j < num_concurr_msgs; j++)
         {
-            ret = post_send(msg_size, lkey, (uint64_t)buf_ptr, (uint32_t)i, qp[i], buf_ptr);
+            ret = post_write_with_imm(msg_size, lkey, (uint64_t)buf_ptr, (uint32_t)i, qp[i], buf_ptr, server_MRinfo->rkey, server_MRinfo->addr);
             check(ret == 0, "thread[%ld]: failed to post send", thread_id);
             buf_offset = (buf_offset + msg_size) % buf_size;
             buf_ptr = buf_base + buf_offset;
@@ -153,47 +153,21 @@ void *client_thread_func(void *arg)
                     num_acked_peers += 1;
                     if (num_acked_peers == num_peers)
                     {
+                        log("client recv stop signal, break!");
                         gettimeofday(&end, NULL);
                         stop = true;
                         break;
                     }
                 }
-                else
-                {
-                    /* echo the message back */
-                    post_send(msg_size, lkey, 0, imm_data, qp[imm_data], msg_ptr);
-                }
                 /* post a new receive */
                 ret = post_srq_recv(msg_size, lkey, wc[i].wr_id, srq, msg_ptr);
             }
-            else if (wc[i].opcode == IBV_WC_RECV_RDMA_WITH_IMM)
-            {
-                ops_count += 1;
-                debug("IBV_WC_RECV_RDMA_WITH_IMM ops_count = %ld", ops_count);
-                if (ops_count == NUM_WARMING_UP_OPS)
-                    gettimeofday(&start, NULL);
-
-                imm_data = ntohl(wc[i].imm_data);
-                char *msg_ptr = (char *)wc[i].wr_id;
-
-                if (imm_data == MSG_CTL_STOP)
-                {
-                    num_acked_peers += 1;
-                    if (num_acked_peers == num_peers)
-                    {
-                        gettimeofday(&end, NULL);
-                        stop = true;
-                        break;
-                    }
-                }
-                else
-                    /* echo the message back */
-                    post_send(msg_size, lkey, 0, imm_data, qp[imm_data], msg_ptr);
-                /* post a new receive */
-                ret = post_srq_recv(msg_size, lkey, wc[i].wr_id, srq, msg_ptr);
-            }
+            else if (wc[i].opcode == IBV_WC_RDMA_WRITE)
+                debug("IBV_WC_RDMA_WRITE[%ld] sccess!", wc[i].wr_id);
+            else if (wc[i].opcode == IBV_WC_SEND)
+                debug("IBV_WC_SEND[%ld] sccess!", wc[i].wr_id);
             else
-                debug("error ! unkown opcode");
+                debug("error ! unkown opcode %d", wc[i].opcode);
         } /* loop through all wc */
     }
 
