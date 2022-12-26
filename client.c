@@ -46,11 +46,11 @@ void *client_thread_func(void *arg)
     CPU_SET((int)thread_id, &cpuset);
     // self = pthread_self();
     // ret = pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
-    // check(ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
+    // CHECK(ret != 0, "thread[%ld]: failed to set thread affinity", thread_id);
 
     /* pre-post recvs */
     wc = (struct ibv_wc *)calloc(num_wc, sizeof(struct ibv_wc));
-    check(wc != NULL, "thread[%ld]: failed to allocate wc.", thread_id);
+    CHECK(wc != NULL, "thread[%ld]: failed to allocate wc.", thread_id);
 
     for (i = 0; i < num_peers; i++)
     {
@@ -69,13 +69,13 @@ void *client_thread_func(void *arg)
         {
             n = ibv_poll_cq(cq, num_wc, wc);
         } while (n < 1);
-        check(n > 0, "thread[%ld]: failed to poll cq", thread_id);
+        CHECK(n > 0, "thread[%ld]: failed to poll cq", thread_id);
 
         for (i = 0; i < n; i++)
         {
             if (wc[i].status != IBV_WC_SUCCESS)
             {
-                check(0, "thread[%ld]: wc failed status: %s.",
+                CHECK(0, "thread[%ld]: wc failed status: %s.",
                       thread_id, ibv_wc_status_str(wc[i].status));
             }
             if (wc[i].opcode == IBV_WC_RECV)
@@ -104,8 +104,8 @@ void *client_thread_func(void *arg)
     {
         for (j = 0; j < num_concurr_msgs; j++)
         {
-            ret = post_write_with_imm(msg_size, lkey, (uint64_t)buf_ptr, (uint32_t)i, qp[i], buf_ptr, server_MRinfo->rkey, server_MRinfo->addr);
-            check(ret == 0, "thread[%ld]: failed to post send", thread_id);
+            ret = post_write_with_imm(msg_size, lkey, (uint64_t)buf_ptr, (uint32_t)i, qp[i], buf_ptr, recvMRinfo->rkey, recvMRinfo->addr);
+            CHECK(ret == 0, "thread[%ld]: failed to post send", thread_id);
             buf_offset = (buf_offset + msg_size) % buf_size;
             buf_ptr = buf_base + buf_offset;
         }
@@ -118,7 +118,7 @@ void *client_thread_func(void *arg)
         n = ibv_poll_cq(cq, num_wc, wc);
         if (n < 0)
         {
-            check(0, "thread[%ld]: Failed to poll cq", thread_id);
+            CHECK(0, "thread[%ld]: Failed to poll cq", thread_id);
         }
 
         for (i = 0; i < n; i++)
@@ -127,12 +127,12 @@ void *client_thread_func(void *arg)
             {
                 if (wc[i].opcode == IBV_WC_SEND)
                 {
-                    check(0, "thread[%ld]: send failed status: %s; wr_id = %" PRIx64 "",
+                    CHECK(0, "thread[%ld]: send failed status: %s; wr_id = %" PRIx64 "",
                           thread_id, ibv_wc_status_str(wc[i].status), wc[i].wr_id);
                 }
                 else
                 {
-                    check(0, "thread[%ld]: recv failed status: %s; wr_id = %" PRIx64 "",
+                    CHECK(0, "thread[%ld]: recv failed status: %s; wr_id = %" PRIx64 "",
                           thread_id, ibv_wc_status_str(wc[i].status), wc[i].wr_id);
                 }
             }
@@ -205,20 +205,20 @@ int run_client()
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
     client_threads = (pthread_t *)calloc(num_threads, sizeof(pthread_t));
-    check(client_threads != NULL, "Failed to allocate client_threads.");
+    CHECK(client_threads != NULL, "Failed to allocate client_threads.");
 
     for (i = 0; i < num_threads; i++)
     {
         ret = pthread_create(&client_threads[i], &attr,
                              client_thread_func, (void *)i);
-        check(ret == 0, "Failed to create client_thread[%ld]", i);
+        CHECK(ret == 0, "Failed to create client_thread[%ld]", i);
     }
 
     bool thread_ret_normally = true;
     for (i = 0; i < num_threads; i++)
     {
         ret = pthread_join(client_threads[i], &status);
-        check(ret == 0, "Failed to join client_thread[%ld].", i);
+        CHECK(ret == 0, "Failed to join client_thread[%ld].", i);
         if ((long)status != 0)
         {
             thread_ret_normally = false;

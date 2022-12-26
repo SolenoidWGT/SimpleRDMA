@@ -37,7 +37,7 @@ extern FILE *log_fp;
         goto error;                \
     }
 
-#define check(A, M, ...)           \
+#define CHECK(A, M, ...)           \
     if (!(A))                      \
     {                              \
         log_err(M, ##__VA_ARGS__); \
