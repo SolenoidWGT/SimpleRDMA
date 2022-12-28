@@ -6,8 +6,6 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
-struct ConfigInfo config_info;
-
 /* remove space, tab and line return from the line */
 void clean_up_line(char* line) {
 	char* i = line;

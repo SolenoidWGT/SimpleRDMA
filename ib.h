@@ -51,5 +51,6 @@ int post_srq_recv(uint32_t req_size, uint32_t lkey, uint64_t wr_id, struct ibv_s
 
 int post_write_with_imm(uint32_t req_size, uint32_t lkey, uint64_t wr_id, uint32_t imm_data, struct ibv_qp* qp,
                         char* buf, uint32_t rkey, void* remote_addr);
-
+int post_write(uint32_t req_size, uint32_t lkey, uint64_t wr_id, struct ibv_qp* qp, char* buf, uint32_t rkey,
+               void* remote_addr);
 #endif /*ib.h*/

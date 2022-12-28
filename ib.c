@@ -99,7 +99,31 @@ int post_write_with_imm(uint32_t req_size, uint32_t lkey, uint64_t wr_id, uint32
 	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
 
 	send_wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-	send_wr.imm_data = imm_data;
+	send_wr.imm_data = htonl(imm_data);
+
+	send_wr.wr_id = (uintptr_t)wr_id;
+	send_wr.sg_list = &sge;
+	send_wr.num_sge = 1;
+	send_wr.send_flags = IBV_SEND_SIGNALED;
+	send_wr.wr.rdma.remote_addr = (uintptr_t)remote_addr; // WGT
+	send_wr.wr.rdma.rkey = rkey;
+
+	sge.addr = (uintptr_t)buf;
+	sge.length = req_size;
+	sge.lkey = lkey;
+
+	err = ibv_post_send(qp, &send_wr, &bad_wr);
+	return err;
+}
+
+int post_write(uint32_t req_size, uint32_t lkey, uint64_t wr_id, struct ibv_qp* qp, char* buf, uint32_t rkey,
+               void* remote_addr) {
+	struct ibv_send_wr send_wr, *bad_wr = NULL;
+	struct ibv_sge sge;
+	int err = 0;
+	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+
+	send_wr.opcode = IBV_WR_RDMA_WRITE;
 
 	send_wr.wr_id = (uintptr_t)wr_id;
 	send_wr.sg_list = &sge;

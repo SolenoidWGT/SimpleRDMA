@@ -106,6 +106,7 @@ int sock_create_connect(char* server_name, char* port) {
 	ret = getaddrinfo(server_name, port, &hints, &result);
 	CHECK(ret == 0, "[ERROR] %s", gai_strerror(ret));
 
+REPEAT:
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
 		sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 		if (sock_fd == -1) {
@@ -122,7 +123,13 @@ int sock_create_connect(char* server_name, char* port) {
 		sock_fd = -1;
 	}
 
-	CHECK(rp != NULL, "could not connect.");
+	if (rp == NULL) {
+		usleep(1000);
+		goto REPEAT;
+	}
+
+	// CHECK(rp != NULL, "could not connect.");
+	// log("connect to %s success!", server_name);
 
 	freeaddrinfo(result);
 	return sock_fd;
@@ -195,11 +202,37 @@ int sock_get_MR_info(int sock_fd, struct MRinfo* mr_info) {
 	struct MRinfo tmp_mr_info;
 
 	n = sock_read(sock_fd, (char*)&tmp_mr_info, sizeof(struct MRinfo));
-	CHECK(n == sizeof(struct MRinfo), "read mr_info from socket.");
+	CHECK(n == sizeof(struct MRinfo), "read mr_info .expected:[%ld]B, but get [%d]B", sizeof(struct MRinfo), n);
 
 	mr_info->addr = tmp_mr_info.addr;
 	mr_info->length = tmp_mr_info.length;
 	mr_info->rkey = tmp_mr_info.rkey;
+
+	if (mr_info->addr == NULL || mr_info->length == 0 || mr_info->rkey == 0) {
+		log("ERROR! sock_get_MR_info NULL");
+		goto error;
+	}
+
+	// CHECK(mr_info->addr != NULL && mr_info->length != 0 && mr_info->rkey != 0, "sock_set_mr_info get NUll mr!.");
+
+	return 0;
+
+error:
+	return -1;
+}
+
+int sock_barrier(int nRanks, int rank) {
+	int n, i;
+	char ack = 1;
+	CHECK(peer_sockfd != NULL, "sock_barrier.");
+	for (i = 0; i < nRanks; i++) {
+		if (i != rank) {
+			n = sock_write(peer_sockfd[i], (char*)&ack, sizeof(char));
+			CHECK(n == sizeof(char), "sock_barrier.");
+			n = sock_read(peer_sockfd[i], (char*)&ack, sizeof(char));
+			CHECK(n == sizeof(char), "sock_barrier.");
+		}
+	}
 
 	return 0;
 

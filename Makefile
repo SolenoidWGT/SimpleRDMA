@@ -1,17 +1,17 @@
-CC=gcc
+CC=/mnt/cache/share/gcc/gcc-7.5.0/bin/gcc
 CFLAGS=-Wall -Werror -O2
 INCLUDES=
 LDFLAGS=-libverbs
-LIBS=-pthread -lrdmacm -ldl
+LIBS=-pthread -lrdmacm -ldl -lnuma
 
-SRCS=main.c client.c config.c ib.c server.c setup_ib.c sock.c
+SRCS=main.c setup_ib.c sock.c polling.c ib.c
 OBJS=$(SRCS:.c=.o)
 PROG=rdma-tutorial
 PROG2=test_mlock
 
 all: $(PROG) $(PROG2)
-
-debug: CFLAGS=-Wall -Werror -g -DDEBUG
+#  -g 
+debug: CFLAGS=-Wall -Werror -O3 -DDEBUG -DDEBUG_IB -L/mnt/cache/wangguoteng.p/RDMA-Tutorial/lib
 debug: $(PROG) $(PROG2)
 
 .c.o:
