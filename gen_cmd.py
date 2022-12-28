@@ -6,6 +6,8 @@
 # srun --partition=caif_rd -n8 -N2 --ntasks-per-node=4 -w SH-IDC1-10-140-0-166,SH-IDC1-10-140-1-176 --preempt  -l --multi-prog ib_launch.conf >log.log 2>&1
 # ps -efww|grep -w 'rdma-tutorial'|grep -v grep|awk '{print $2}'|xargs kill -9
 
+# srun --partition=caif_rd  -w SH-IDC1-10-140-0-178 --preempt ./0_ib_launch.conf
+# srun --partition=caif_rd  -w SH-IDC1-10-140-0-207 --preempt ./1_ib_launch.conf
 import os
 import stat
 # 2052096
@@ -13,14 +15,14 @@ import stat
 node1 = "SZ-OFFICE2-172-20-21-185"
 node2 = "SZ-OFFICE2-172-20-21-189"
 USE_BASH = True
-exec_bin = "/mnt/lustre/wangguoteng2/SimpleRDMA/rdma-tutorial"
+path = "/mnt/cache/wangguoteng.p/SimpleRDMA/"
+exec_bin = path + "rdma-tutorial"
 
-
-node_list = ["SZ-OFFICE2-172-20-21-185", "SZ-OFFICE2-172-20-21-189"]
-msg_size = 2052096
+node_list = ["SH-IDC1-10-140-0-178", "SH-IDC1-10-140-0-207"]
+msg_size = 2097152 * 8
 nRanks = 2
 nodeNum = len(node_list)
-taskPerNode = nRanks // nodeNum
+taskPerNode = [1, 1]
 rank = 0
 
 if __name__ == "__main__":
@@ -38,24 +40,25 @@ if __name__ == "__main__":
     else:
 
         files = ["{}_ib_launch.conf".format(i) for i in range(nodeNum)]
-        for f in files:
+        for nodeCount, f in enumerate(files):
             with open(f, "w") as fb:
                 fb.writelines("#!/bin/bash\n")
 
-                for i in range(taskPerNode):
+                for i in range(taskPerNode[nodeCount]):
                     sstr = exec_bin + ' ' + \
                         str(nRanks) + ' ' + str(rank) + \
-                        ' ' + str(msg_size) + ' ' + str(taskPerNode) + ' '
+                        ' ' + str(msg_size) + ' ' + str(taskPerNode[nodeCount]) + ' '
                     for j in range(nodeNum):
-                        for p in range(taskPerNode):
+                        for p in range(taskPerNode[j]):
                             sstr += (node_list[j] + ' ')
 
-                    if i != taskPerNode - 1:
+                    if i != taskPerNode[nodeCount] - 1:
                         fb.writelines(sstr + ' &' + '\n')
                     else:
                         fb.writelines(sstr + '\n')
 
                     rank += 1
                 fb.writelines(
-                    "sleep 20 && ps -efww|grep -w 'rdma-tutorial'|grep -v grep|awk '{print $2}'|xargs kill -9\n")
-            os.chmod(f, stat.S_IXOTH)
+                    "sleep 20 && ps -efww|grep -w 'rdma-tutorial'|grep -v grep|awk '{print $2}'|xargs kill -9\n"
+                )
+            # os.chmod(f, stat.S_IXOTH)

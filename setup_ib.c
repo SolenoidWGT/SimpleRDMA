@@ -8,12 +8,11 @@
 #include <malloc.h>
 #include <unistd.h>
 
-//#define DEBUG_IB 1
+#define DEBUG_IB 1
 
 struct IBRes ib_res;
 // struct MRinfo* recvMRinfo = NULL;
 pthread_t sock_server_t;
-pthread_t ibv_polling_t;
 pthread_mutex_t sock_mutex;
 
 int* peer_sockfd = NULL;
@@ -401,10 +400,6 @@ int setup_ib(int nRanks) {
 	ret = (int)(uint64_t)sock_exchange_MR(false);
 	pthread_join(sock_server_t, &re);
 	CHECK((int)(uint64_t)re == 0 && ret == 0, "Failed to sock_exchange_MR");
-
-	// launch ibv polling thread
-	ret = pthread_create(&ibv_polling_t, NULL, pollingFunc, NULL);
-	CHECK(ret == 0, "pollingFunc thread create error");
 
 	ibv_free_device_list(dev_list);
 

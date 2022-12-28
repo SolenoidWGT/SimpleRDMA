@@ -58,7 +58,7 @@ void* pollingFunc(void* vargs) {
 	// int num_concurr_msgs = config_info.num_concurr_msgs;
 	size_t msg_size = config_info.msg_size;
 
-	do_setaffinity(1);
+	do_setaffinity(POLLING_THREAD_ID, -1);
 
 	// malloc cq.
 	wc = (struct ibv_wc*)calloc_numa(num_wc * sizeof(struct ibv_wc));

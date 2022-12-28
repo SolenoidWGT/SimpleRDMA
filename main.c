@@ -1,5 +1,6 @@
 #define _GNU_SOURCE /* See feature_test_macros(7) */
 
+#include "bruck.h"
 #include "client.h"
 #include "config.h"
 #include "debug.h"
@@ -13,12 +14,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <ulimit.h>
 
 int local_node;
 int node_num;
+#define REPEAT_TIME (WARMUP + REPEAT)
+
+long max_time;
+long min_time;
+long avg_time;
+
 struct cpuInfo node_list[SOCKET_NUMS];
 FILE* log_fp = NULL;
 pthread_t* send_thread;
+pthread_t ibv_polling_t;
+
 struct ConfigInfo config_info;
 int init_env();
 void destroy_env();
@@ -29,12 +39,15 @@ void destroy_env();
 // 	char flag;
 // }
 int cal_numa_node(int locak_rank, int nRanks, int task_per_node) {
-	int thread_per_rank = (nRanks - 1) + 2;
-	int cpu_per_node = node_list[0].numa_cpu_num;
-	return (thread_per_rank * locak_rank / cpu_per_node) % node_num;
+	if (USE_MULIT_THREAD) {
+		int thread_per_rank = (nRanks - 1) + 2;
+		int cpu_per_node = node_list[0].numa_cpu_num;
+		return (thread_per_rank * locak_rank / cpu_per_node) % node_num;
+	} else
+		return 0;
 }
 
-int get_cpu_mask_on_node0(void) {
+int get_cpu_mask(void) {
 	int ret, node = 0;
 
 	node_num = numa_num_configured_nodes();
@@ -52,14 +65,14 @@ int get_cpu_mask_on_node0(void) {
 		CHECK(ret == 0, "Failed to run numa_node_to_cpus");
 		bit_size = numa_mask->size;
 
-		printf("CPU on Node-[%d]: ", node);
+		// printf("CPU on Node-[%d]: ", node);
 		while (bit_size != 0) {
 
 			unsigned long cpu_mask = *(numa_mask->maskp + long_int_num);
 			unsigned long mask = 1; // flag = (unsigned long)1 << (sizeof(unsigned long) * 8 - 1),
 			while (true) {
 				if (mask & cpu_mask) {
-					printf("%d, ", core);
+					// printf("%d, ", core);
 					node_list[node].cpu_numa_list[node_list[node].numa_cpu_num++] = core;
 				}
 
@@ -71,7 +84,7 @@ int get_cpu_mask_on_node0(void) {
 			bit_size -= (sizeof(unsigned long) * 8);
 			long_int_num++;
 		}
-		printf("\n");
+		// printf("\n");
 	}
 
 	numa_free_cpumask(numa_mask);
@@ -81,7 +94,7 @@ error:
 	return -1;
 }
 
-void do_setaffinity(int tid) {
+void do_setaffinity(int tid, int cpu) {
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	int rank = config_info.rank;
@@ -92,19 +105,22 @@ void do_setaffinity(int tid) {
 	if (local_node == -1)
 		local_node = cal_numa_node(locak_rank, nRanks, task_per_node);
 
-	int cpu = get_cpu_for_rank(locak_rank, nRanks, tid, local_node);
+	if (cpu == -1)
+		cpu = get_cpu_for_rank(locak_rank, nRanks, tid, local_node);
+
 	CPU_SET(cpu, &mask);
 	if (sched_setaffinity(0, sizeof(mask), &mask) == -1) {
-		printf("warning: could not set CPU affinity, continuing...\n");
+		log_warn("warning: could not set CPU affinity, continuing...\n");
 	}
-	printf("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]\n", rank, tid, local_node, cpu);
+	log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node, cpu);
 }
 
 void* send_thread_func(void* aargs) {
 	int peer_rank = (int)(int64_t)aargs;
 	int rank = config_info.rank;
 	int tid = (peer_rank > rank) ? (peer_rank - 1) : peer_rank;
-	do_setaffinity(tid);
+	int send_count = 0;
+	do_setaffinity(tid + SENDING_THREAD_ID, -1);
 
 	struct ibv_qp* qp = ib_res.qp[peer_rank];
 	size_t msg_size = config_info.msg_size;
@@ -117,78 +133,32 @@ void* send_thread_func(void* aargs) {
 	char* send_addr = ib_res.ib_send_buf + send_offset;
 	char* remote_addr = (char*)(ib_res.remote_mr_info[peer_rank].addr) + recv_offset;
 
-	memory_barrier();
-	while (unlikely(*(volatile char*)(send_addr) != (char)1))
-		_mm_pause();
+	while (send_count < REPEAT_TIME) {
+		memory_barrier();
+		while (unlikely(*(volatile char*)(send_addr) != (char)1))
+			_mm_pause();
 
-	// uint32_t imm = MSG_CTL_STOP;
-	post_write(msg_size, lkey, (uint64_t)send_addr, qp, (char*)send_addr, rkey, remote_addr);
-	// post_write_with_imm(msg_size, lkey, (uint64_t)send_addr, imm, qp, (char*)send_addr, rkey, remote_addr);
+		// uint32_t imm = MSG_CTL_STOP;
+		post_write(msg_size, lkey, (uint64_t)send_addr, qp, (char*)send_addr, rkey, remote_addr);
+		// post_write_with_imm(msg_size, lkey, (uint64_t)send_addr, imm, qp, (char*)send_addr, rkey, remote_addr);
+
+		memory_barrier();
+		*send_addr = (char)0;
+		send_count++;
+	}
+
 	return (void*)0;
 }
 
-// struct ibv_mr* (*ibv_internal_reg_mr_iova2)(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access);
-
-int main(int argc, char* argv[]) {
-	int ret = 0, rank, nRanks, i;
-
-	size_t msg_size;
+long launch_send_multi_thread(int nRanks, int rank, int msg_size) {
+	int i;
 	struct timespec time1, time2;
 	long diffInNanos;
 
-	local_node = -1;
-	config_info.num_concurr_msgs = 1;
-	config_info.nRanks = atoi(argv[1]);
-	config_info.nPeers = config_info.nRanks - 1;
-	config_info.rank = atoi(argv[2]);
-	config_info.msg_size = atoi(argv[3]);
-	config_info.task_per_node = atoi(argv[4]);
-	// config_info.msg_size = 16;
-
-	get_cpu_mask_on_node0();
-	do_setaffinity(0);
-	// return 0;
-
-	config_info.sock_port_list = (char**)calloc_numa(config_info.nPeers * sizeof(char*));
-	config_info.node_ip_list = (char**)calloc_numa(config_info.nPeers * sizeof(char*));
-
-	for (int i = 0; i < config_info.nRanks; i++) {
-		config_info.sock_port_list[i] = (char*)calloc_numa(8);
-		config_info.node_ip_list[i] = (char*)calloc_numa(128);
-
-		sprintf(config_info.sock_port_list[i], "%d", 13410 + i);
-		sprintf(config_info.node_ip_list[i], "%s", argv[5 + i]);
-	}
-
-	ret = init_env();
-	CHECK(ret == 0, "Failed to init env");
-
-	nRanks = config_info.nRanks;
-	rank = config_info.rank;
-	msg_size = config_info.msg_size;
-
-	recv_all_flag = (uint8_t*)calloc_numa(1);
-	polling_flag = (uint8_t*)calloc_numa(1);
-	send_all_flag = (uint8_t*)calloc_numa(1);
-
-	*recv_all_flag = 0;
-	*send_all_flag = 0;
-	*polling_flag = 1;
-
-	ret = setup_ib(config_info.nRanks);
-	CHECK(ret == 0, "Failed to setup IB");
-
-	// size_t buf_size = ib_res.ib_buf_size;
 	char* send_addr = ib_res.ib_send_buf;
 	char* recv_addr = ib_res.ib_recv_buf + msg_size;
 
-	send_thread = (pthread_t*)calloc_numa(nRanks * sizeof(pthread_t));
-	for (i = 0; i < nRanks; i++) {
-		if (i != rank)
-			pthread_create(&send_thread[i], NULL, send_thread_func, (void*)(uint64_t)i);
-	}
-
-	debug("send_addr = %" PRIx64 "", (uint64_t)send_addr);
+	// debug("send_addr = %" PRIx64 "", (uint64_t)send_addr);
 	sock_barrier(nRanks, rank);
 	clock_gettime(CLOCK_MONOTONIC, &time1);
 	for (i = 0; i < nRanks; i++) {
@@ -205,6 +175,9 @@ int main(int argc, char* argv[]) {
 		if (i != rank) {
 			while (unlikely(*(volatile char*)(recv_addr - 1) != (char)1))
 				_mm_pause();
+
+			memory_barrier();
+			*(recv_addr - 1) = (char)0;
 		}
 		recv_addr += msg_size;
 	}
@@ -215,12 +188,210 @@ int main(int argc, char* argv[]) {
 
 	clock_gettime(CLOCK_MONOTONIC, &time2);
 	diffInNanos = (time2.tv_sec - time1.tv_sec) * (long)1e9 + (time2.tv_nsec - time1.tv_nsec);
-	log("Rank-[%d] wait send_all_flag Use time [%.3lf] us", rank, (double)diffInNanos / 1000);
+	// log("Rank-[%d] wait send_all_flag Use time [%.3lf] us", rank, (double)diffInNanos / 1000);
+	return diffInNanos;
+}
 
+long launch_send_single_thread(int nRanks, int rank, int msg_size) {
+	int peer, n, i, send_count = 0;
+	int num_wc = nRanks - 1;
+	struct timespec time1, time2;
+	long diffInNanos = -1;
+
+	char* send_addr = ib_res.ib_send_buf;
+	char* recv_addr = ib_res.ib_recv_buf + msg_size;
+	size_t remote_offset = rank * msg_size * config_info.num_concurr_msgs;
+
+	struct ibv_cq* cq = ib_res.cq;
+	struct ibv_wc* wc = NULL;
+	uint32_t lkey = ib_res.send_mr->lkey;
+
+	// malloc cq.
+	wc = (struct ibv_wc*)calloc_numa(num_wc * sizeof(struct ibv_wc));
+	CHECK(wc != NULL, "failed to allocate wc.");
+
+	// debug("send_addr = %" PRIx64 "", (uint64_t)send_addr);
 	sock_barrier(nRanks, rank);
+	clock_gettime(CLOCK_MONOTONIC, &time1);
 
-	*polling_flag = 0;
-	pthread_join(ibv_polling_t, NULL);
+	// init all send
+	for (peer = 0; peer < nRanks; peer++) {
+
+		if (peer != rank) {
+			struct ibv_qp* qp = ib_res.qp[peer];
+			uint32_t rkey = ib_res.remote_mr_info[peer].rkey;
+			char* remote_addr = ib_res.remote_mr_info[peer].addr + remote_offset;
+
+			// set recv done flag.
+			*(send_addr + msg_size - 1) = (char)1;
+
+			post_write(msg_size, lkey, (uint64_t)send_addr, qp, (char*)send_addr, rkey, remote_addr);
+		}
+		send_addr += (msg_size * config_info.num_concurr_msgs);
+	}
+
+	// recving all data
+	for (peer = 0; peer < nRanks; peer++) {
+		if (peer != rank) {
+			while (unlikely(*(volatile char*)(recv_addr - 1) != (char)1))
+				_mm_pause();
+
+			memory_barrier();
+			*(recv_addr - 1) = (char)0;
+		}
+		recv_addr += msg_size;
+	}
+
+	// wait all send finish.
+	while (likely(send_count != num_wc)) {
+		do {
+			n = ibv_poll_cq(cq, num_wc, wc);
+		} while (n < 1);
+		CHECK(n > 0, "failed to poll cq");
+
+		for (i = 0; i < n; i++) {
+			if (likely(wc[i].opcode == IBV_WC_RDMA_WRITE)) {
+				send_count++;
+			} else
+				log("Fail polling wc");
+		}
+	}
+
+	clock_gettime(CLOCK_MONOTONIC, &time2);
+	diffInNanos = (time2.tv_sec - time1.tv_sec) * (long)1e9 + (time2.tv_nsec - time1.tv_nsec);
+	// log("Rank-[%d] wait send_all_flag Use time [%.3lf] us", rank, (double)diffInNanos / 1000);
+error:
+	return diffInNanos;
+}
+
+void launch_polling_and_sending_thread(int rank, int nRanks) {
+	int ret, i;
+	send_thread = (pthread_t*)calloc_numa(nRanks * sizeof(pthread_t));
+
+	// launch ibv polling thread
+	ret = pthread_create(&ibv_polling_t, NULL, pollingFunc, NULL);
+	CHECK(ret == 0, "pollingFunc thread create error");
+
+	// launch ibv sendding thread
+	for (i = 0; i < nRanks; i++) {
+		if (i != rank)
+			ret = pthread_create(&send_thread[i], NULL, send_thread_func, (void*)(uint64_t)i);
+		CHECK(ret == 0, "send_thread_func thread create error");
+	}
+error:
+	return;
+}
+
+// struct ibv_mr* (*ibv_internal_reg_mr_iova2)(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access);
+
+int main(int argc, char* argv[]) {
+	int ret = 0, rank, nRanks, i;
+
+	size_t msg_size;
+
+	local_node = -1;
+	config_info.num_concurr_msgs = 1;
+	config_info.nRanks = atoi(argv[1]);
+	config_info.nPeers = config_info.nRanks - 1;
+	config_info.rank = atoi(argv[2]);
+	config_info.msg_size = atoi(argv[3]);
+	config_info.task_per_node = atoi(argv[4]);
+	// config_info.msg_size = 16;
+
+	ret = init_env();
+	CHECK(ret == 0, "Failed to init env");
+
+	get_cpu_mask();
+	do_setaffinity(MAIN_THREAD_ID, -1);
+	// return 0;
+
+	config_info.sock_port_list = (char**)calloc_numa(config_info.nPeers * sizeof(char*));
+	config_info.node_ip_list = (char**)calloc_numa(config_info.nPeers * sizeof(char*));
+
+	for (int i = 0; i < config_info.nRanks; i++) {
+		config_info.sock_port_list[i] = (char*)calloc_numa(8);
+		config_info.node_ip_list[i] = (char*)calloc_numa(128);
+
+		sprintf(config_info.sock_port_list[i], "%d", 13510 + i);
+		sprintf(config_info.node_ip_list[i], "%s", argv[5 + i]);
+	}
+
+	nRanks = config_info.nRanks;
+	rank = config_info.rank;
+	msg_size = config_info.msg_size;
+
+	recv_all_flag = (uint8_t*)calloc_numa(1);
+	polling_flag = (uint8_t*)calloc_numa(1);
+	send_all_flag = (uint8_t*)calloc_numa(1);
+
+	*recv_all_flag = 0;
+	*send_all_flag = 0;
+	*polling_flag = 1;
+
+	ret = setup_ib(config_info.nRanks);
+	CHECK(ret == 0, "Failed to setup IB");
+
+	if (USE_MULIT_THREAD)
+		launch_polling_and_sending_thread(rank, nRanks);
+
+	// size_t buf_size = ib_res.ib_buf_size;
+	log("Start warnup!");
+	for (i = 0; i < WARMUP; i++) {
+		sock_barrier(nRanks, rank);
+		if (USE_MULIT_THREAD)
+			launch_send_multi_thread(nRanks, rank, msg_size);
+		else
+			launch_send_single_thread(nRanks, rank, msg_size);
+	}
+
+	long max_time = 0;
+	long min_time = INT64_MAX;
+	long avg_time = 0;
+	long tt;
+	int max_idx = 0, min_idx = 0;
+	int range[10];
+	memset(range, 0, sizeof(int) * 10);
+
+	log("Start repeat!");
+	for (i = 0; i < REPEAT; i++) {
+		sock_barrier(nRanks, rank);
+		if (USE_MULIT_THREAD)
+			tt = launch_send_multi_thread(nRanks, rank, msg_size);
+		else
+			tt = launch_send_single_thread(nRanks, rank, msg_size);
+
+		if (tt > max_time) {
+			max_time = tt;
+			max_idx = i;
+		}
+
+		if (tt < min_time) {
+			min_time = tt;
+			min_idx = i;
+		}
+
+		avg_time += tt;
+		// log("Rank-[%d], round-[%d] time [%.3lf] us", rank, i, (double)tt / 1000);
+		range[(int)(tt / (long)1e6) / 10]++;
+	}
+
+	// usleep(1000);
+	log("Rank-[%d], max_time:[%.3lf] idx-[%d], min_time:[%3.lf] idx-[%d], avg_time:[%3.lf]", rank,
+	    (double)max_time / 1e3, max_idx, (double)min_time / 1e3, min_idx, (double)avg_time / (1e3 * REPEAT));
+
+	for (i = 0; i < 10; i++)
+		log("Rank-[%d], range[%d ms-%d ms]:[%d]", rank, i * 10, (i + 1) * 10, range[i]);
+
+	if (false)
+		all2AllBruck(rank, nRanks, rank % config_info.task_per_node, msg_size);
+
+	close_sock(nRanks);
+	if (USE_MULIT_THREAD) {
+		*polling_flag = 0;
+		pthread_join(ibv_polling_t, NULL);
+	}
+
+	return 0;
 error:
 	// if (ibvhandle != NULL) dlclose(ibvhandle);
 	close_ib_connection();
@@ -249,7 +420,8 @@ void print_config_info() {
 
 int init_env() {
 	char fname[64] = {'\0'};
-	sprintf(fname, "rank-[%d].log", config_info.rank);
+	const char* mulit_threads = USE_MULIT_THREAD ? "multi_theads" : "singe_thread";
+	sprintf(fname, "[%s]-rank-[%d].log", mulit_threads, config_info.rank);
 
 	log_fp = fopen(fname, "w");
 	CHECK(log_fp != NULL, "Failed to open log file");
