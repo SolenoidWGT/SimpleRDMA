@@ -54,6 +54,7 @@ int sock_create_bind(char* port) {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
 	int sock_fd = -1, ret = 0;
+	int option = 1;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_socktype = SOCK_STREAM;
@@ -65,6 +66,8 @@ int sock_create_bind(char* port) {
 
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
 		sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+
 		if (sock_fd < 0) {
 			continue;
 		}
@@ -98,6 +101,7 @@ int sock_create_connect(char* server_name, char* port) {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
 	int sock_fd = -1, ret = 0;
+	int option = 1;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_socktype = SOCK_STREAM;
@@ -112,6 +116,8 @@ REPEAT:
 		if (sock_fd == -1) {
 			continue;
 		}
+
+		setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 
 		ret = connect(sock_fd, rp->ai_addr, rp->ai_addrlen);
 		if (ret == 0) {

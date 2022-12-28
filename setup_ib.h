@@ -13,13 +13,21 @@
 #endif
 
 #define CPU_NUMS 128
-extern int numa_cpu_num;
+#define SOCKET_NUMS 4
+extern int local_node;
+extern int node_num;
+struct cpuInfo {
+	int numa_cpu_num;
+	int cpu_numa_list[CPU_NUMS];
+};
+
+extern struct cpuInfo node_list[SOCKET_NUMS];
 extern int cpu_numa_list[CPU_NUMS];
 inline static void memory_barrier() { asm volatile("" ::: "memory"); }
 
-inline static int get_cpu_for_rank(int rank, int nRanks, int pthread_id) {
+inline static int get_cpu_for_rank(int local_rank, int nRanks, int pthread_id, int node) {
 	// 15 sender thread, 1 polling thread, 1 main thread.
-	return cpu_numa_list[(rank * (nRanks + 2) + pthread_id) % numa_cpu_num];
+	return node_list[node].cpu_numa_list[(local_rank * (nRanks - 1 + 2) + pthread_id) % node_list[node].numa_cpu_num];
 }
 
 struct IBRes {
@@ -54,5 +62,7 @@ void close_ib_connection();
 void* pollingFunc(void* vargs);
 // int connect_qp_server();
 int connect_qp_client();
-
+void do_setaffinity(int tid);
+void* calloc_numa(size_t size);
+void free_numa(void* addr);
 #endif /*setup_ib.h*/

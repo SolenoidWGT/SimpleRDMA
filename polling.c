@@ -20,7 +20,7 @@ struct pollingArgs {
 };
 
 int createPollingThread() {
-	struct pollingArgs* args = (struct pollingArgs*)malloc(sizeof(struct pollingArgs));
+	struct pollingArgs* args = (struct pollingArgs*)calloc_numa(sizeof(struct pollingArgs));
 	int retval = pthread_create(&polling_thread, NULL, pollingFunc, (void*)args);
 	if (retval) {
 		log("pthread create error.");
@@ -30,11 +30,10 @@ int createPollingThread() {
 }
 
 void* pollingFunc(void* vargs) {
-	int n, i, cpu, ret, ops_count = 0;
+	int n, i, ret, ops_count = 0;
 	// struct pollingArgs* args = (struct pollingArgs*)vargs;
 	// int num_wc = args->num_wc;
 	// int thread_id = args->thread_id;
-	cpu_set_t mask; // CPU核的集合
 	// ib_res is gloabl var
 	// struct ibv_qp **qp = ib_res.qp;
 	int64_t thread_id = 1;
@@ -58,17 +57,11 @@ void* pollingFunc(void* vargs) {
 	int nPeers = nRanks - 1;
 	// int num_concurr_msgs = config_info.num_concurr_msgs;
 	size_t msg_size = config_info.msg_size;
-	CPU_ZERO(&mask);
-	cpu = get_cpu_for_rank(config_info.rank % 8, config_info.nRanks, 1);
-	// log("Rank-[%d]- polling thread cpu is [%d]", config_info.rank, cpu);
-	CPU_SET(cpu, &mask);
-	if (sched_setaffinity(0, sizeof(mask), &mask) == -1) //设置线程CPU亲和力
-	{
-		printf("warning: could not set CPU affinity, continuing...\n");
-	}
+
+	do_setaffinity(1);
 
 	// malloc cq.
-	wc = (struct ibv_wc*)calloc(num_wc, sizeof(struct ibv_wc));
+	wc = (struct ibv_wc*)calloc_numa(num_wc * sizeof(struct ibv_wc));
 	CHECK(wc != NULL, "thread[%ld]: failed to allocate wc.", thread_id);
 
 	/* wait for start signal */
@@ -144,6 +137,6 @@ void* pollingFunc(void* vargs) {
 finish:
 	return (void*)(int64_t)0;
 error:
-	// free(args);
+	// free_numa(args);
 	return (void*)(int64_t)-1;
 }

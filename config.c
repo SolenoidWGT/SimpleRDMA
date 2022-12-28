@@ -198,19 +198,19 @@ void destroy_config_info() {
 	if (config_info.servers != NULL) {
 		for (i = 0; i < num_servers; i++) {
 			if (config_info.servers[i] != NULL) {
-				free(config_info.servers[i]);
+				free_numa(config_info.servers[i]);
 			}
 		}
-		free(config_info.servers);
+		free_numa(config_info.servers);
 	}
 
 	if (config_info.clients != NULL) {
 		for (i = 0; i < num_clients; i++) {
 			if (config_info.clients[i] != NULL) {
-				free(config_info.clients[i]);
+				free_numa(config_info.clients[i]);
 			}
 		}
-		free(config_info.clients);
+		free_numa(config_info.clients);
 	}
 }
 

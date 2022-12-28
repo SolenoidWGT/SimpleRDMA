@@ -21,6 +21,9 @@ int local_sockfd = 0;
 
 struct QPInfo* local_qp_info = NULL;
 struct QPInfo* remote_qp_info = NULL;
+
+void* calloc_numa(size_t size);
+
 void close_sock(int nRanks) {
 	int i;
 	if (peer_sockfd != NULL) {
@@ -29,12 +32,22 @@ void close_sock(int nRanks) {
 				close(peer_sockfd[i]);
 			}
 		}
-		free(peer_sockfd);
+		free_numa(peer_sockfd);
 		peer_sockfd = NULL;
 	}
 	if (local_sockfd > 0) {
 		close(local_sockfd);
 	}
+}
+
+void* calloc_numa(size_t size) {
+	void* addr = numa_alloc_onnode(size, local_node);
+	memset(addr, 0, size);
+	return addr;
+}
+
+void free_numa(void* addr) {
+	// numa_free(addr, );
 }
 
 void* sock_exchange_MR(void* args) {
@@ -176,7 +189,7 @@ int sock_handshack(int nRanks, int rank) {
 
 	socklen_t peer_addr_len = sizeof(struct sockaddr_in);
 
-	peer_sockfd = (int*)calloc(nRanks, sizeof(int));
+	peer_sockfd = (int*)calloc_numa(nRanks * sizeof(int));
 	CHECK(peer_sockfd != NULL, "Failed to allocate peer_sockfd");
 
 	local_sockfd = sock_create_bind(config_info.sock_port_list[rank]);
@@ -236,21 +249,20 @@ int setup_ib(int nRanks) {
 	int i = 0, j = 0;
 	int num_ib_cards;
 	int rank = config_info.rank;
-	// int nRanks = config_info.nRanks;
 	struct ibv_device** dev_list = NULL;
 	memset(&ib_res, 0, sizeof(struct IBRes));
 
 	ib_res.num_qps = nRanks;
 
 	/* init remote mr */
-	ib_res.remote_mr_info = (struct MRinfo*)calloc(nRanks, sizeof(struct MRinfo));
+	ib_res.remote_mr_info = (struct MRinfo*)calloc_numa(nRanks * sizeof(struct MRinfo));
 	CHECK(ib_res.remote_mr_info != NULL, "Failed to allocate remote_mr_info");
 
 	/* init qp info */
-	remote_qp_info = (struct QPInfo*)calloc(nRanks, sizeof(struct QPInfo));
+	remote_qp_info = (struct QPInfo*)calloc_numa(nRanks * sizeof(struct QPInfo));
 	CHECK(remote_qp_info != NULL, "Failed to allocate remote_qp_info");
 
-	local_qp_info = (struct QPInfo*)calloc(nRanks, sizeof(struct QPInfo));
+	local_qp_info = (struct QPInfo*)calloc_numa(nRanks * sizeof(struct QPInfo));
 	CHECK(local_qp_info != NULL, "Failed to allocate local_qp_info");
 
 	/* get IB device list */
@@ -290,8 +302,8 @@ int setup_ib(int nRanks) {
 #ifdef DEBUG_IB
 		log("NUMA is Enable!");
 #endif
-		ib_res.ib_recv_buf = (char*)numa_alloc_onnode(ib_res.ib_buf_size, 0);
-		ib_res.ib_send_buf = (char*)numa_alloc_onnode(ib_res.ib_buf_size, 0);
+		ib_res.ib_recv_buf = (char*)numa_alloc_onnode(ib_res.ib_buf_size, local_node);
+		ib_res.ib_send_buf = (char*)numa_alloc_onnode(ib_res.ib_buf_size, local_node);
 	} else {
 		// ib_res.ib_recv_buf = (char*)malloc(ib_res.ib_buf_size);
 		// ib_res.ib_send_buf = (char*)malloc(ib_res.ib_buf_size);
@@ -349,7 +361,7 @@ int setup_ib(int nRanks) {
 	// qp_init_attr.xrc_domain = NULL;
 	qp_init_attr.sq_sig_all = 0;
 
-	ib_res.qp = (struct ibv_qp**)calloc(ib_res.num_qps, sizeof(struct ibv_qp*));
+	ib_res.qp = (struct ibv_qp**)calloc_numa(ib_res.num_qps * sizeof(struct ibv_qp*));
 	CHECK(ib_res.qp != NULL, "Failed to allocate qp");
 
 #ifdef DEBUG_IB
@@ -419,7 +431,7 @@ void close_ib_connection() {
 				ibv_destroy_qp(ib_res.qp[i]);
 			}
 		}
-		free(ib_res.qp);
+		free_numa(ib_res.qp);
 	}
 
 	if (ib_res.srq != NULL) {
@@ -451,8 +463,8 @@ void close_ib_connection() {
 			numa_free(ib_res.ib_recv_buf, ib_res.ib_buf_size);
 			numa_free(ib_res.ib_send_buf, ib_res.ib_buf_size);
 		} else {
-			free(ib_res.ib_recv_buf);
-			free(ib_res.ib_send_buf);
+			free_numa(ib_res.ib_recv_buf);
+			free_numa(ib_res.ib_send_buf);
 		}
 	}
 }
