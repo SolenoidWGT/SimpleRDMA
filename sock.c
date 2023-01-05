@@ -4,6 +4,7 @@
 #include "ib.h"
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -110,7 +111,7 @@ int sock_create_connect(char* server_name, char* port) {
 	ret = getaddrinfo(server_name, port, &hints, &result);
 	CHECK(ret == 0, "[ERROR] %s", gai_strerror(ret));
 
-REPEAT:
+LLOP:
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
 		sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 		if (sock_fd == -1) {
@@ -131,7 +132,7 @@ REPEAT:
 
 	if (rp == NULL) {
 		usleep(1000);
-		goto REPEAT;
+		goto LLOP;
 	}
 
 	// CHECK(rp != NULL, "could not connect.");

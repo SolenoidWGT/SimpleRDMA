@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+char const* ncclGetLastError(ncclComm_t comm);
 #define CUDACHECK(cmd)                                                                                           \
 	do {                                                                                                         \
 		cudaError_t err = cmd;                                                                                   \
@@ -81,40 +81,8 @@ static void getHostName(char* hostname, int maxlen) {
  */
 #define HOSTID_FILE "/proc/sys/kernel/random/boot_id"
 
-static size_t wordSize(ncclDataType_t type) {
-	switch (type) {
-	case ncclChar:
-#if NCCL_MAJOR >= 2
-	// case ncclInt8:
-	case ncclUint8:
-#endif
-		return 1;
-	case ncclHalf:
-#if defined(__CUDA_BF16_TYPES_EXIST__)
-	case ncclBfloat16:
-#endif
-		// case ncclFloat16:
-		return 2;
-	case ncclInt:
-	case ncclFloat:
-#if NCCL_MAJOR >= 2
-	// case ncclInt32:
-	case ncclUint32:
-		// case ncclFloat32:
-#endif
-		return 4;
-	case ncclInt64:
-	case ncclUint64:
-	case ncclDouble:
-		// case ncclFloat64:
-		return 8;
-	default:
-		return 0;
-	}
-}
 
 extern int test_ncclVersion; // init'd with ncclGetVersion()
-const int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
 extern ncclDataType_t test_types[ncclNumTypes];
@@ -122,4 +90,6 @@ extern const char* test_typenames[ncclNumTypes];
 extern ncclRedOp_t test_ops[];
 extern const char* test_opnames[];
 
+testResult_t ncclAlltoAll(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclComm_t comm,
+                          cudaStream_t stream);
 #endif

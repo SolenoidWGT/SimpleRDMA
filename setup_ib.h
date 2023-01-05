@@ -12,8 +12,8 @@
 #define POLLING_THREAD_ID 1
 #define SENDING_THREAD_ID 2
 
-#define WARMUP  20
-#define REPEAT  100
+#define WARMUP 20
+#define REPEAT 300
 
 extern int local_node;
 extern int node_num;
@@ -69,4 +69,5 @@ void* calloc_numa(size_t size);
 void free_numa(void* addr);
 void close_sock(int nRanks);
 int cal_numa_node(int locak_rank, int nRanks, int task_per_node);
+int sock_handshack(int nRanks, int rank);
 #endif /*setup_ib.h*/

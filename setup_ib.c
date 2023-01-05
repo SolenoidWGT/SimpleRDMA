@@ -375,14 +375,6 @@ int setup_ib(int nRanks) {
 			ib_res.qp[i] = NULL;
 	}
 
-	/* connect QP */
-	ret = sock_handshack(nRanks, rank);
-	CHECK(ret == 0, "sock_handshack  error");
-
-#ifdef DEBUG_IB
-	log("sock_handshack sccuess!");
-#endif
-
 	ret = pthread_create(&sock_server_t, NULL, sock_exchange_QP, (void*)(int64_t) true);
 	CHECK(ret == 0, "sock_exchange_QP thread create error");
 	ret = (int)(uint64_t)sock_exchange_QP(false);
@@ -392,7 +384,7 @@ int setup_ib(int nRanks) {
 	sock_barrier(nRanks, rank);
 
 #ifdef DEBUG_IB
-	log("sock_barrier sccuess!");
+	log("sock_barrier success!");
 #endif
 
 	ret = pthread_create(&sock_server_t, NULL, sock_exchange_MR, (void*)(int64_t) true);
@@ -404,7 +396,7 @@ int setup_ib(int nRanks) {
 	ibv_free_device_list(dev_list);
 
 #ifdef DEBUG_IB
-	log("IB setup sccuess!");
+	log("IB setup success!");
 #endif
 
 	return 0;
