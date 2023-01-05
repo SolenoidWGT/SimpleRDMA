@@ -46,9 +46,9 @@ void* pollingFunc(void* vargs) {
 
 	// buffer info
 	// size_t buf_size = ib_res.ib_buf_size;
-	uint32_t lkey = ib_res.recv_mr->lkey;
-	// char* buf_ptr = ib_res.ib_recv_buf;
-	// char* buf_base = ib_res.ib_recv_buf;
+	uint32_t lkey = ib_res.recv_mr_info[0].mr->lkey;
+	// char* buf_ptr = ib_res.recv_mr_info.addr ;
+	// char* buf_base = ib_res.recv_mr_info.addr;
 	// int buf_offset = 0;
 
 	// rank info

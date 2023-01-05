@@ -12,8 +12,9 @@
 #define POLLING_THREAD_ID 1
 #define SENDING_THREAD_ID 2
 
-#define WARMUP 20
-#define REPEAT 300
+#define WARMUP 2
+#define REPEAT 10
+#define REPEAT_TIME (WARMUP + REPEAT)
 
 extern int local_node;
 extern int node_num;
@@ -32,25 +33,37 @@ inline static int get_cpu_for_rank(int local_rank, int nRanks, int pthread_id, i
 	                                     node_list[node].numa_cpu_num];
 }
 
+struct IBMemInfo {
+	int mr_id;
+	char* addr;
+	struct ibv_mr* mr;
+	struct MRinfo mr_info;
+};
+
 struct IBRes {
 	struct ibv_context* ctx;
 	struct ibv_pd* pd;
-	struct ibv_mr* send_mr;
-	struct ibv_mr* recv_mr;
 	struct ibv_cq* cq;
 	struct ibv_qp** qp;
 	struct ibv_srq* srq;
 	struct ibv_port_attr port_attr;
 	struct ibv_device_attr dev_attr;
 
-	struct MRinfo* remote_mr_info;
-	struct MRinfo local_recv_mr_info;
 	// struct MRinfo local_send_mr_info;
 
 	int num_qps;
-	char* ib_recv_buf;
-	char* ib_send_buf;
-	size_t ib_buf_size;
+
+	// struct ibv_mr* send_mr;
+	// struct ibv_mr* recv_mr;
+	// char* ib_recv_buf;
+	// char* ib_send_buf;
+	// size_t ib_buf_size;
+	// struct MRinfo local_recv_mr_info;
+	int mr_nums;
+	// int remote_mr_nums;
+	struct IBMemInfo* send_mr_info;
+	struct IBMemInfo* recv_mr_info;
+	struct MRinfo** remote_mr_info; // *nRanks
 };
 
 extern struct IBRes ib_res;
@@ -70,4 +83,8 @@ void free_numa(void* addr);
 void close_sock(int nRanks);
 int cal_numa_node(int locak_rank, int nRanks, int task_per_node);
 int sock_handshack(int nRanks, int rank);
+int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo* mrInfo);
+int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff);
+int setup_ib_buffer(int nRanks, int nDevs);
+int exchange_mr_info(struct IBMemInfo* mr_ptr);
 #endif /*setup_ib.h*/

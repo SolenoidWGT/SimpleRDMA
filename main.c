@@ -18,7 +18,6 @@
 
 int local_node;
 int node_num;
-#define REPEAT_TIME (WARMUP + REPEAT)
 
 long max_time;
 long min_time;
@@ -124,14 +123,14 @@ void* send_thread_func(void* aargs) {
 
 	struct ibv_qp* qp = ib_res.qp[peer_rank];
 	size_t msg_size = config_info.msg_size;
-	uint32_t lkey = ib_res.send_mr->lkey;
-	uint32_t rkey = ib_res.remote_mr_info[peer_rank].rkey;
+	uint32_t lkey = ib_res.send_mr_info[0].mr->lkey;
+	uint32_t rkey = ib_res.remote_mr_info[peer_rank][0].rkey;
 
 	// volatile
 	size_t send_offset = peer_rank * msg_size * config_info.num_concurr_msgs;
 	size_t recv_offset = rank * msg_size * config_info.num_concurr_msgs;
-	char* send_addr = ib_res.ib_send_buf + send_offset;
-	char* remote_addr = (char*)(ib_res.remote_mr_info[peer_rank].addr) + recv_offset;
+	char* send_addr = ib_res.send_mr_info[0].addr + send_offset;
+	char* remote_addr = (char*)(ib_res.remote_mr_info[peer_rank][0].addr) + recv_offset;
 
 	while (send_count < REPEAT_TIME) {
 		memory_barrier();
@@ -155,8 +154,8 @@ long launch_send_multi_thread(int nRanks, int rank, int msg_size) {
 	struct timespec time1, time2;
 	long diffInNanos;
 
-	char* send_addr = ib_res.ib_send_buf;
-	char* recv_addr = ib_res.ib_recv_buf + msg_size;
+	char* send_addr = ib_res.send_mr_info[0].addr;
+	char* recv_addr = ib_res.recv_mr_info[0].addr + msg_size;
 
 	// debug("send_addr = %" PRIx64 "", (uint64_t)send_addr);
 	sock_barrier(nRanks, rank);
@@ -198,13 +197,13 @@ long launch_send_single_thread(int nRanks, int rank, int msg_size) {
 	struct timespec time1, time2;
 	long diffInNanos = -1;
 
-	char* send_addr = ib_res.ib_send_buf;
-	char* recv_addr = ib_res.ib_recv_buf + msg_size;
+	char* send_addr = ib_res.send_mr_info[0].addr;
+	char* recv_addr = ib_res.recv_mr_info[0].addr + msg_size;
 	size_t remote_offset = rank * msg_size * config_info.num_concurr_msgs;
 
 	struct ibv_cq* cq = ib_res.cq;
 	struct ibv_wc* wc = NULL;
-	uint32_t lkey = ib_res.send_mr->lkey;
+	uint32_t lkey = ib_res.send_mr_info[0].mr->lkey;
 
 	// malloc cq.
 	wc = (struct ibv_wc*)calloc_numa(num_wc * sizeof(struct ibv_wc));
@@ -221,8 +220,8 @@ long launch_send_single_thread(int nRanks, int rank, int msg_size) {
 		if (peer != rank) {
 			struct ibv_sge sge;
 			struct ibv_qp* qp = ib_res.qp[peer];
-			uint32_t rkey = ib_res.remote_mr_info[peer].rkey;
-			char* remote_addr = ib_res.remote_mr_info[peer].addr + remote_offset;
+			uint32_t rkey = ib_res.remote_mr_info[peer][0].rkey;
+			char* remote_addr = ib_res.remote_mr_info[peer][0].addr + remote_offset;
 
 			// set recv done flag.
 			*(send_addr + msg_size - 1) = (char)1;
@@ -288,14 +287,14 @@ long IBSendRecvP2P(int nRanks, int rank, char* send_buff, char* recv_buff, int d
 	struct ibv_wc wc;
 
 	// size_t remote_offset = rank * msg_size * config_info.num_concurr_msgs;
-	char* send_dst_addr = (char*)ib_res.remote_mr_info[dst_peer].addr;
+	char* send_dst_addr = (char*)ib_res.remote_mr_info[dst_peer][0].addr;
 	*(send_buff + msg_size - 1) = (char)1;
 
 	// clock_gettime(CLOCK_MONOTONIC, &time1);
 	CHECK(dst_peer != rank || src_peer != rank, "dst rank or src rank error");
 
-	post_write(msg_size, ib_res.send_mr->lkey, (uint64_t)send_buff, ib_res.qp[dst_peer], send_buff,
-	           ib_res.remote_mr_info[dst_peer].rkey, send_dst_addr);
+	post_write(msg_size, ib_res.send_mr_info[0].mr->lkey, (uint64_t)send_buff, ib_res.qp[dst_peer], send_buff,
+	           ib_res.remote_mr_info[dst_peer][0].rkey, send_dst_addr);
 
 	while (unlikely(*(volatile char*)(recv_buff - 1) != (char)1))
 		_mm_pause();
@@ -340,6 +339,7 @@ error:
 int main(int argc, char* argv[]) {
 	bool nccl_test = true;
 	int ret = 0;
+	int nDevs = 8;
 
 	local_node = -1;
 	config_info.num_concurr_msgs = 1;
@@ -387,14 +387,13 @@ int main(int argc, char* argv[]) {
 	*polling_flag = 1;
 
 	/* connect QP */
-	ret = sock_handshack(nRanks, rank);
-	CHECK(ret == 0, "sock_handshack  error");
-	log("sock_handshack success!");
+	CHECK(sock_handshack(nRanks, rank) == 0, "sock_handshack  error");
+	CHECK(setup_ib(config_info.nRanks) == 0, "Failed to setup IB");
+	CHECK(setup_ib_buffer(nRanks, nDevs) == 0, "Setip ib");
 
 	if (!nccl_test) {
-		ret = setup_ib(config_info.nRanks);
-		CHECK(ret == 0, "Failed to setup IB");
-
+		CHECK(alloc_ib_buffer(nRanks, &(ib_res.send_mr_info[0])) == 0, "alloc ib buffer");
+		CHECK(alloc_ib_buffer(nRanks, &(ib_res.recv_mr_info[0])) == 0, "alloc ib buffer");
 		if (USE_MULIT_THREAD)
 			launch_polling_and_sending_thread(rank, nRanks);
 
@@ -441,8 +440,8 @@ int main(int argc, char* argv[]) {
 		}
 
 		// usleep(1000);
-		log("Rank-[%d], msg_size:[%ld], all2allSize:[%ld] MB, nic_flow_size:[%3.lf] MB, max_time:[%.3lf] idx-[%d], "
-		    "min_time:[%3.lf] idx-[%d], avg_time:[%3.lf]",
+		log("Rank-[%d], msg_size:[%ld], all2allSize:[%ld] MB, nic_flow_size:[%.3lf] MB, max_time:[%.3lf]us,idx-[%d], "
+		    "min_time:[%.3lf]us, idx-[%d], avg_time:[%.3lf]us",
 		    rank, msg_size, all2all_size / (1024 * 1024), nic_flow_size / (1024 * 1024), (double)max_time / 1e3,
 		    max_idx, (double)min_time / 1e3, min_idx, (double)avg_time / (1e3 * REPEAT));
 
@@ -455,7 +454,7 @@ int main(int argc, char* argv[]) {
 	} else {
 		// all2AllBruck(rank, nRanks, rank % config_info.task_per_node, msg_size, all2all_size, nic_flow_size);
 
-		all2AllBruck_nGPUs(nRanks, 8, msg_size, (rank == 0) ? 0 : 8, rank);
+		all2AllBruck_nGPUs(16, 8, msg_size, (rank == 0) ? 0 : 8, rank);
 	}
 
 	close_sock(nRanks);

@@ -49,8 +49,15 @@ void free_numa(void* addr) {
 	// numa_free(addr, );
 }
 
+struct ExcMRArgs {
+	struct IBMemInfo* mr_ptr;
+	bool is_server;
+};
+
 void* sock_exchange_MR(void* args) {
-	bool is_server = (bool)(int64_t)args;
+	bool is_server = ((struct ExcMRArgs*)args)->is_server;
+	struct IBMemInfo* mr_ptr = ((struct ExcMRArgs*)args)->mr_ptr;
+	int mr_id = mr_ptr->mr_id;
 	int ret = 0, i = 0;
 	int nRanks = config_info.nRanks;
 	int rank = config_info.rank;
@@ -68,13 +75,12 @@ void* sock_exchange_MR(void* args) {
 	/* send mr_info to client */
 	for (i = start; i < end; i++) {
 		if (i != rank) {
-			if (ib_res.local_recv_mr_info.addr == NULL || ib_res.local_recv_mr_info.length == 0 ||
-			    ib_res.local_recv_mr_info.rkey == 0) {
+			if (mr_ptr->mr_info.addr == NULL || mr_ptr->mr_info.length == 0 || mr_ptr->mr_info.rkey == 0) {
 				log("ERROR! \"%s\" sock_set_mr_info NULL", info_str);
 				// goto error;
 			}
 
-			ret = sock_set_mr_info(peer_sockfd[i], &(ib_res.local_recv_mr_info));
+			ret = sock_set_mr_info(peer_sockfd[i], &(mr_ptr->mr_info));
 			CHECK(ret == 0, "Failed to send mr_info to client[%d]", i);
 		}
 	}
@@ -83,18 +89,19 @@ void* sock_exchange_MR(void* args) {
 		if (i != rank) {
 			ret = -1;
 			// while (ret != 0) {
-			ret = sock_get_MR_info(peer_sockfd[i], &(ib_res.remote_mr_info[i]));
+			ret = sock_get_MR_info(peer_sockfd[i], &(ib_res.remote_mr_info[i][mr_id]));
 			// usleep(1000);
 			//}
 			// CHECK(ret == 0, "Failed to get mr_info[%d] from server", i);
 
-			if (ib_res.remote_mr_info[i].addr == NULL || ib_res.remote_mr_info[i].length == 0 ||
-			    ib_res.remote_mr_info[i].rkey == 0) {
+			if (ib_res.remote_mr_info[i][mr_id].addr == NULL || ib_res.remote_mr_info[i][mr_id].length == 0 ||
+			    ib_res.remote_mr_info[i][mr_id].rkey == 0) {
 				log("ERROR! \"%s\" sock_get_MR_info NULL", info_str);
 			}
 #ifdef DEBUG_IB
-			log("\"%s\": Remote Rank-[%d] mr info addr:%p, length:%ld, rkey: %d", info_str, i,
-			    ib_res.remote_mr_info[i].addr, ib_res.remote_mr_info[i].length, ib_res.remote_mr_info[i].rkey);
+			log("\"%s\": Remote Rank-[%d] mr info addr:%p, length:%ld, rkey: %u", info_str, i,
+			    ib_res.remote_mr_info[i][mr_id].addr, ib_res.remote_mr_info[i][mr_id].length,
+			    ib_res.remote_mr_info[i][mr_id].rkey);
 #endif
 		}
 	}
@@ -210,7 +217,7 @@ int sock_handshack(int nRanks, int rank) {
 	}
 
 	pthread_join(sock_conn_t, NULL);
-
+	log("sock_handshack success!");
 	return 0;
 error:
 	close_sock(nRanks);
@@ -222,7 +229,7 @@ int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo*
 	/* the recv buffer occupies the first half while the sending buffer */
 	/* occupies the second half */
 	/* assume all msgs are of the same content */
-	CHECK(buffer != NULL, "Failed to allocate ib_recv_buf");
+	CHECK(buffer != NULL, "Failed to allocate mr.addr");
 	memset(buffer, 0, size);
 
 	*mr = ibv_reg_mr(ib_res.pd, (void*)buffer, size,
@@ -234,7 +241,7 @@ int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo*
 		mrInfo->length = (*mr)->length;
 		mrInfo->rkey = (*mr)->rkey;
 
-		log("Local mr info addr:%p, length:%ld, rkey: %d", mrInfo->addr, mrInfo->length, mrInfo->rkey);
+		log("Local mr info addr:%p, length:%ld, rkey: %u", mrInfo->addr, mrInfo->length, mrInfo->rkey);
 	}
 
 	return 0;
@@ -242,20 +249,96 @@ error:
 	return -1;
 }
 
-int setup_ib(int nRanks) {
+int exchange_mr_info(struct IBMemInfo* mr_ptr) {
+	struct ExcMRArgs arg1, arg2;
+	arg1.mr_ptr = mr_ptr;
+	arg1.is_server = true;
+	CHECK(pthread_create(&sock_server_t, NULL, sock_exchange_MR, (void*)(&arg1)) == 0,
+	      "sock_exchange_MR thread create error");
+
+	arg2.mr_ptr = mr_ptr;
+	arg2.is_server = false;
+	sock_exchange_MR((void*)(&arg2));
+
+	pthread_join(sock_server_t, NULL);
+	return 0;
+error:
+	return -1;
+}
+
+void exchange_qp_info() {
 	void* re;
+	int ret = pthread_create(&sock_server_t, NULL, sock_exchange_QP, (void*)(int64_t) true);
+	CHECK(ret == 0, "sock_exchange_QP thread create error");
+	ret = (int)(uint64_t)sock_exchange_QP(false);
+	pthread_join(sock_server_t, &re);
+	CHECK((int)(uint64_t)re == 0 && ret == 0, "Failed to sock_exchange_QP");
+error:
+	return;
+}
+
+int setup_ib_buffer(int nRanks, int nDevs) {
+	ib_res.send_mr_info = (struct IBMemInfo*)calloc_numa(nRanks * sizeof(struct IBMemInfo));
+	ib_res.recv_mr_info = (struct IBMemInfo*)calloc_numa(nRanks * sizeof(struct IBMemInfo));
+	ib_res.remote_mr_info = (struct MRinfo**)calloc_numa(nRanks * sizeof(struct MRinfo*));
+	for (int i = 0; i < nDevs; i++) {
+		ib_res.remote_mr_info[i] = (struct MRinfo*)calloc_numa(sizeof(struct MRinfo));
+	}
+	ib_res.mr_nums = nRanks;
+	// ib_res.remote_mr_nums = 0;
+	return 0;
+}
+
+int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff) {
+	/* init remote mr */
+	size_t buff_size = config_info.msg_size * config_info.num_concurr_msgs * ib_res.num_qps;
+	CHECK(buff != NULL, "Failed to allocate remote mr info");
+	buff->mr_id = 0;
+
+	/* register mr */
+	if (numa_available() == 0 && numa_num_configured_nodes() > 1) {
+#ifdef DEBUG_IB
+		log("NUMA is Enable!");
+#endif
+		buff->addr = (char*)numa_alloc_onnode(buff_size, local_node);
+	} else {
+		// buff->addr = (char*)malloc(buff_size);
+		buff->addr = (char*)memalign(4096, buff_size);
+	}
+
+	CHECK(register_ib_mr(buff->addr, buff_size, &(buff->mr), &(buff->mr_info)) == 0, "mr");
+	CHECK(exchange_mr_info(buff) == 0, "mr exchange");
+
+	// Pre post recv.
+	// char* buf_ptr = ib_res.recv_mr_info[0].addr;
+	// char* buf_base = buf_ptr;
+	// size_t buf_offset = 0;
+	// size_t msg_size = config_info.msg_size;
+	// uint32_t lkey = ib_res.recv_mr_info[0].mr->lkey;
+	// for (i = 0; i < nRanks; i++) {
+	// 	if (i != rank) {
+	// 		for (j = 0; j < config_info.num_concurr_msgs; j++) {
+	// 			ret = post_srq_recv(msg_size, lkey, (uint64_t)buf_ptr, ib_res.srq, buf_ptr);
+	// 			buf_offset = (buf_offset + msg_size) % buff_size;
+	// 			buf_ptr = buf_base + buf_offset;
+	// 		}
+	// 	}
+	// }
+	log("IB setup MR success!");
+	return 0;
+error:
+	return -1;
+}
+
+int setup_ib(int nRanks) {
 	int ret = 0;
-	int i = 0, j = 0;
+	int i = 0;
 	int num_ib_cards;
 	int rank = config_info.rank;
 	struct ibv_device** dev_list = NULL;
 	memset(&ib_res, 0, sizeof(struct IBRes));
 
 	ib_res.num_qps = nRanks;
-
-	/* init remote mr */
-	ib_res.remote_mr_info = (struct MRinfo*)calloc_numa(nRanks * sizeof(struct MRinfo));
-	CHECK(ib_res.remote_mr_info != NULL, "Failed to allocate remote_mr_info");
 
 	/* init qp info */
 	remote_qp_info = (struct QPInfo*)calloc_numa(nRanks * sizeof(struct QPInfo));
@@ -294,25 +377,6 @@ int setup_ib(int nRanks) {
 		break;
 	}
 
-	/* register mr */
-	ib_res.ib_buf_size = config_info.msg_size * config_info.num_concurr_msgs * ib_res.num_qps;
-
-	if (numa_available() == 0 && numa_num_configured_nodes() > 1) {
-#ifdef DEBUG_IB
-		log("NUMA is Enable!");
-#endif
-		ib_res.ib_recv_buf = (char*)numa_alloc_onnode(ib_res.ib_buf_size, local_node);
-		ib_res.ib_send_buf = (char*)numa_alloc_onnode(ib_res.ib_buf_size, local_node);
-	} else {
-		// ib_res.ib_recv_buf = (char*)malloc(ib_res.ib_buf_size);
-		// ib_res.ib_send_buf = (char*)malloc(ib_res.ib_buf_size);
-		ib_res.ib_recv_buf = (char*)memalign(4096, ib_res.ib_buf_size);
-		ib_res.ib_send_buf = (char*)memalign(4096, ib_res.ib_buf_size);
-	}
-
-	register_ib_mr(ib_res.ib_recv_buf, ib_res.ib_buf_size, &(ib_res.recv_mr), &(ib_res.local_recv_mr_info));
-	register_ib_mr(ib_res.ib_send_buf, ib_res.ib_buf_size, &(ib_res.send_mr), NULL);
-
 	/* create cq */
 #ifdef DEBUG_IB
 	log("ib_res.dev_attr.max_cqe is %d", ib_res.dev_attr.max_cqe);
@@ -327,23 +391,6 @@ int setup_ib(int nRanks) {
 	};
 
 	ib_res.srq = ibv_create_srq(ib_res.pd, &srq_init_attr);
-
-	// Pre post recv.
-	char* buf_ptr = ib_res.ib_recv_buf;
-	char* buf_base = buf_ptr;
-	size_t buf_offset = 0;
-	size_t msg_size = config_info.msg_size;
-	size_t buff_size = ib_res.ib_buf_size;
-	uint32_t lkey = ib_res.recv_mr->lkey;
-	for (i = 0; i < nRanks; i++) {
-		if (i != rank) {
-			for (j = 0; j < config_info.num_concurr_msgs; j++) {
-				ret = post_srq_recv(msg_size, lkey, (uint64_t)buf_ptr, ib_res.srq, buf_ptr);
-				buf_offset = (buf_offset + msg_size) % buff_size;
-				buf_ptr = buf_base + buf_offset;
-			}
-		}
-	}
 
 	/* create qp */
 	struct ibv_qp_init_attr qp_init_attr;
@@ -375,29 +422,12 @@ int setup_ib(int nRanks) {
 			ib_res.qp[i] = NULL;
 	}
 
-	ret = pthread_create(&sock_server_t, NULL, sock_exchange_QP, (void*)(int64_t) true);
-	CHECK(ret == 0, "sock_exchange_QP thread create error");
-	ret = (int)(uint64_t)sock_exchange_QP(false);
-	pthread_join(sock_server_t, &re);
-	CHECK((int)(uint64_t)re == 0 && ret == 0, "Failed to sock_exchange_QP");
+	exchange_qp_info();
 
 	sock_barrier(nRanks, rank);
-
-#ifdef DEBUG_IB
-	log("sock_barrier success!");
-#endif
-
-	ret = pthread_create(&sock_server_t, NULL, sock_exchange_MR, (void*)(int64_t) true);
-	CHECK(ret == 0, "sock_exchange_MR thread create error");
-	ret = (int)(uint64_t)sock_exchange_MR(false);
-	pthread_join(sock_server_t, &re);
-	CHECK((int)(uint64_t)re == 0 && ret == 0, "Failed to sock_exchange_MR");
+	log("IB setup QP success!");
 
 	ibv_free_device_list(dev_list);
-
-#ifdef DEBUG_IB
-	log("IB setup success!");
-#endif
 
 	return 0;
 
@@ -429,12 +459,23 @@ void close_ib_connection() {
 		ibv_destroy_cq(ib_res.cq);
 	}
 
-	if (ib_res.send_mr != NULL) {
-		ibv_dereg_mr(ib_res.send_mr);
-	}
+	for (int i = 0; i < ib_res.mr_nums; i++) {
+		if (ib_res.send_mr_info[i].mr != NULL) {
+			ibv_dereg_mr(ib_res.send_mr_info[i].mr);
+		}
 
-	if (ib_res.recv_mr != NULL) {
-		ibv_dereg_mr(ib_res.recv_mr);
+		if (ib_res.recv_mr_info[i].mr != NULL) {
+			ibv_dereg_mr(ib_res.recv_mr_info[i].mr);
+		}
+		if (ib_res.recv_mr_info[i].addr != NULL) {
+			if (numa_available() == 0 && numa_num_configured_nodes() > 1) {
+				numa_free(ib_res.recv_mr_info[i].addr, ib_res.recv_mr_info[i].mr_info.length);
+				numa_free(ib_res.send_mr_info[i].addr, ib_res.send_mr_info[i].mr_info.length);
+			} else {
+				free_numa(ib_res.recv_mr_info[i].addr);
+				free_numa(ib_res.send_mr_info[i].addr);
+			}
+		}
 	}
 
 	if (ib_res.pd != NULL) {
@@ -443,15 +484,5 @@ void close_ib_connection() {
 
 	if (ib_res.ctx != NULL) {
 		ibv_close_device(ib_res.ctx);
-	}
-
-	if (ib_res.ib_recv_buf != NULL) {
-		if (numa_available() == 0 && numa_num_configured_nodes() > 1) {
-			numa_free(ib_res.ib_recv_buf, ib_res.ib_buf_size);
-			numa_free(ib_res.ib_send_buf, ib_res.ib_buf_size);
-		} else {
-			free_numa(ib_res.ib_recv_buf);
-			free_numa(ib_res.ib_send_buf);
-		}
 	}
 }

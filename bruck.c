@@ -19,7 +19,6 @@
 #include <ulimit.h>
 
 #define BRUCK_TYPE float
-#define START_COUNT 30
 
 double setp1TimeArray[REPEAT];
 double setp2TimeArray[REPEAT];
