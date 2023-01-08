@@ -327,25 +327,25 @@ testResult_t test_all2all(struct All2AllInfo* info) {
 }
 
 testResult_t test_ib_send_recv_async(struct All2AllInfo* info) {
-	struct ib_send_args args;
+	struct ib_send_args* args = calloc_numa(sizeof(struct ib_send_args));
 	pthread_t ibv_proxy_t;
 
-	args.loop_num = 10 * REPEAT;
-	args.dev_nRanks = info->nDevs;
-	args.socket_nRanks = info->socket_nRanks;
-	args.socket_rank = info->socket_rank;
-	args.block_size = info->block_size;
-	args.chunk_size = info->block_size;
-	args.use_pcie_relaxed_order = true;
-	args.need_barrier = false;
-	args.only_send = false;
-	args.imm_send = false;
+	args->loop_num = 10 * REPEAT;
+	args->dev_nRanks = info->nDevs;
+	args->socket_nRanks = info->socket_nRanks;
+	args->socket_rank = info->socket_rank;
+	args->block_size = info->block_size;
+	args->chunk_size = info->block_size;
+	args->use_pcie_relaxed_order = true;
+	args->need_barrier = false;
+	args->only_send = false;
+	args->imm_send = false;
 
-	if (args.imm_send) {
-		post_recv_wr(args.socket_rank, args.socket_nRanks, args.dev_nRanks, args.block_size);
+	if (args->imm_send) {
+		post_recv_wr(args->socket_rank, args->socket_nRanks, args->dev_nRanks, args->block_size);
 	}
 
-	CHECK(pthread_create(&ibv_proxy_t, NULL, launch_send_single_thread, (void*)(&args)) == 0, "create ib thread");
+	CHECK(pthread_create(&ibv_proxy_t, NULL, launch_send_single_thread, (void*)args) == 0, "create ib thread");
 	// CHECK(pthread_join(ibv_proxy_t, NULL) == 0, "join ib thread");
 	return testSuccess;
 error:
@@ -411,20 +411,20 @@ testResult_t loop_engine(struct All2AllInfo* info, test_fn fn) {
 	return testSuccess;
 }
 
-int all2AllBruck_nGPUs(int nRanks, int nDevs, size_t block_size, int base, int rank, int peer_nRanks) {
+int all2AllBruck_nGPUs(int dev_nRanks, int nDevs, size_t block_size, int base, int socket_rank, int socket_nRanks) {
 	// NCCL and CUDA stuff
 	struct All2AllInfo* info = (struct All2AllInfo*)calloc_numa(sizeof(struct All2AllInfo));
 	ncclUniqueId id;
 
 	info->nDevs = nDevs;
-	info->socket_rank = rank;
-	info->socket_nRanks = peer_nRanks;
-	info->nRanks = nRanks;
+	info->socket_rank = socket_rank;
+	info->socket_nRanks = socket_nRanks;
+	info->nRanks = dev_nRanks;
 	info->base = base;
 	info->block_size = block_size;
 	info->count_per_block = info->block_size / sizeof(BRUCK_TYPE);
 	// info->count_per_rank = info->count_per_block * nRanks;
-	info->buff_size = info->block_size * nRanks;
+	info->buff_size = info->block_size * info->nRanks;
 	info->total_buff_size = info->buff_size * nDevs;
 
 	info->streams = (cudaStream_t*)calloc_numa(sizeof(cudaStream_t) * nDevs);

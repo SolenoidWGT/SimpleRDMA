@@ -141,12 +141,8 @@ void do_setaffinity(int tid, int cpu) {
 
 // struct ibv_mr* (*ibv_internal_reg_mr_iova2)(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access);
 int main(int argc, char* argv[]) {
-	bool nccl_test = true;
-	bool use_chunk = false;
-	int ret = 0;
-	int nDevs = 8;
 
-	local_node = -1;
+	int ret = 0;
 	config_info.num_concurr_msgs = 1;
 	config_info.nRanks = atoi(argv[1]);
 	config_info.nPeers = config_info.nRanks - 1;
@@ -157,13 +153,13 @@ int main(int argc, char* argv[]) {
 	// config_info.msg_size = 16;
 
 	CHECK(init_env() == 0, "Failed to init env");
-
-	if (nccl_test) {
-		local_node = 0;
-	} else {
-		get_cpu_mask();
-		do_setaffinity(MAIN_THREAD_ID, -1);
-	}
+	bool nccl_test = true;
+	bool use_chunk = false;
+	int nDevs = 8;
+	local_node = 0;
+	use_pcie_relaxed_order = false;
+	get_cpu_mask();
+	do_setaffinity(MAIN_THREAD_ID, -1);
 
 	// return 0;
 
@@ -191,24 +187,18 @@ int main(int argc, char* argv[]) {
 	*send_all_flag = 0;
 	*polling_flag = 1;
 
-	use_pcie_relaxed_order = check_pcie_relaxed_ordering_compliant();
 	if (use_pcie_relaxed_order) {
 		log("Support PCIe relaxed order!");
 	} else {
 		log("Not support PCIe relaxed order!");
 	}
 
-	if (use_chunk)
-		chunk_size = 131072; // 524288
-	else
-		chunk_size = msg_size;
-
 	/* connect QP */
 	CHECK(sock_handshack(nRanks, rank) == 0, "sock_handshack  error");
 	CHECK(setup_ib(config_info.nRanks) == 0, "Failed to setup IB");
-	CHECK(setup_ib_buffer(nccl_test ? nDevs : nRanks, nDevs) == 0, "Setip ib");
+	CHECK(setup_ib_buffer(nDevs) == 0, "Setip ib");
 
-	all2AllBruck_nGPUs(16, 8, msg_size, (rank == 0) ? 0 : 8, rank, nRanks);
+	all2AllBruck_nGPUs(16, nDevs, msg_size, (rank == 0) ? 0 : 8, rank, nRanks);
 
 	close_sock(nRanks);
 

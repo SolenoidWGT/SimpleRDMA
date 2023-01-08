@@ -38,11 +38,12 @@ path = "/mnt/cache/wangguoteng.p/SimpleRDMA/"
 exec_bin = path + "rdma-tutorial"
 
 # SH-IDC1-10-140-0-31
-node_list = ["SH-IDC1-10-140-0-149", "SH-IDC1-10-140-0-150"]
+node_list = ["SZ-OFFICE2-172-20-21-185", "SZ-OFFICE2-172-20-21-189"]
+# node_list = ["SH-IDC1-10-140-0-149", "SH-IDC1-10-140-0-150"]
 # node_list = ["SH-IDC1-10-140-0-31", "SH-IDC1-10-140-0-31"]
 # int((15 * 1024 * 1024) / (15*8))
 
-USE_NSYS = True
+USE_NSYS = False
 NSYS_REPORT_NAME="ngpus-cpy-report"
 if USE_NSYS:
     nsys = "/mnt/petrelfs/caifcicd/dev/nsys/opt/nvidia/nsight-systems/2022.3.4/bin/nsys profile --stats=true --force-overwrite=true  --trace=cuda  --sample=cpu -o {}".format(NSYS_REPORT_NAME)

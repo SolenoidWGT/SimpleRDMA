@@ -9,7 +9,9 @@
 #include <unistd.h>
 
 #define DEBUG_IB 1
-
+// #ifndef IBV_ACCESS_RELAXED_ORDERING
+// #define IBV_ACCESS_RELAXED_ORDERING 0
+// #endif
 struct IBRes ib_res;
 // struct MRinfo* recvMRinfo = NULL;
 pthread_t sock_server_t;
@@ -292,16 +294,16 @@ error:
 	return;
 }
 
-int setup_ib_buffer(int mr_nums, int nDevs) {
-	ib_res.send_mr_info = (struct IBMemInfo*)calloc_numa(mr_nums * sizeof(struct IBMemInfo));
-	ib_res.recv_mr_info = (struct IBMemInfo*)calloc_numa(mr_nums * sizeof(struct IBMemInfo));
-	ib_res.remote_meta_recv_mr_info = (struct MRinfo*)calloc_numa(mr_nums * sizeof(struct MRinfo));
-	ib_res.remote_mr_info = (struct MRinfo**)calloc_numa(mr_nums * sizeof(struct MRinfo*));
+int setup_ib_buffer(int nDevs) {
+	ib_res.send_mr_info = (struct IBMemInfo*)calloc_numa(nDevs * sizeof(struct IBMemInfo));
+	ib_res.recv_mr_info = (struct IBMemInfo*)calloc_numa(nDevs * sizeof(struct IBMemInfo));
+	ib_res.remote_meta_recv_mr_info = (struct MRinfo*)calloc_numa(nDevs * sizeof(struct MRinfo));
+	ib_res.remote_mr_info = (struct MRinfo**)calloc_numa(nDevs * sizeof(struct MRinfo*));
 
 	for (int i = 0; i < nDevs; i++) {
 		ib_res.remote_mr_info[i] = (struct MRinfo*)calloc_numa(sizeof(struct MRinfo));
 	}
-	ib_res.mr_nums = mr_nums;
+	ib_res.mr_nums = nDevs;
 	// ib_res.remote_mr_nums = 0;
 	ib_res.wc = (struct ibv_wc*)calloc_numa(MAX_WC_NUMS * sizeof(struct ibv_wc));
 	return 0;

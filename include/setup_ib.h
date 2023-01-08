@@ -112,7 +112,7 @@ int cal_numa_node(int locak_rank, int nRanks, int task_per_node);
 int sock_handshack(int nRanks, int rank);
 int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo* mrInfo);
 int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff, bool is_meta, size_t buff_size);
-int setup_ib_buffer(int mr_nums, int nDevs);
+int setup_ib_buffer(int nDevs);
 int exchange_mr_info(struct IBMemInfo* mr_ptr, bool is_meta);
 int post_recv_wr(int socket_rank, int socket_nRanks, int nDevs, size_t block_size);
 
