@@ -8,7 +8,7 @@
 
 # srun --partition=caif_rd  -w SH-IDC1-10-140-0-178 --preempt ./0_ib_launch.conf
 # srun --partition=caif_rd  -w SH-IDC1-10-140-0-207 --preempt ./1_ib_launch.conf
-# export LD_LIBRARY_PATH=/mnt/cache/wangguoteng.p/nccl/build_master/lib
+# export LD_LIBRARY_PATH=/mnt/cache/wangguoteng.p/nccl/build_master/lib:/mnt/cache/wangguoteng.p/SimpleRDMA/lib:/mnt/cache/share/cuda-11.3/lib64 
 import os
 import stat
 # 2052096
@@ -38,11 +38,17 @@ path = "/mnt/cache/wangguoteng.p/SimpleRDMA/"
 exec_bin = path + "rdma-tutorial"
 
 # SH-IDC1-10-140-0-31
-# node_list = ["SH-IDC1-10-140-0-180", "SH-IDC1-10-140-0-150"]
-node_list = ["SH-IDC1-10-140-0-31", "SH-IDC1-10-140-0-31"]
+node_list = ["SH-IDC1-10-140-0-149", "SH-IDC1-10-140-0-150"]
+# node_list = ["SH-IDC1-10-140-0-31", "SH-IDC1-10-140-0-31"]
 # int((15 * 1024 * 1024) / (15*8))
 
-USE_NSYS = False
+USE_NSYS = True
+NSYS_REPORT_NAME="ngpus-cpy-report"
+if USE_NSYS:
+    nsys = "/mnt/petrelfs/caifcicd/dev/nsys/opt/nvidia/nsight-systems/2022.3.4/bin/nsys profile --stats=true --force-overwrite=true  --trace=cuda  --sample=cpu -o {}".format(NSYS_REPORT_NAME)
+else:
+    nsys = ""
+
 p2p=True
 if p2p:
     nRanks = 2
@@ -66,10 +72,7 @@ else:
 nodeNum = len(node_list)
 rank = 0
 
-if USE_NSYS:
-    nsys = "/mnt/petrelfs/caifcicd/dev/nsys/opt/nvidia/nsight-systems/2022.3.4/bin/nsys profile --stats=true --force-overwrite=true  --trace=cuda  --sample=cpu -o intrainter-all2all-report"
-else:
-    nsys = ""
+
 print("msg_size: {} MB".format(msg_size/1024.0/1024.0))
 if __name__ == "__main__":
     if not USE_BASH:
@@ -113,4 +116,4 @@ if __name__ == "__main__":
                 fb.writelines(
                     "sleep 20 && ps -efww|grep -w 'rdma-tutorial'|grep -v grep|awk '{print $2}'|xargs kill -9\n"
                 )
-            # os.chmod(f, stat.S_IXOTH)
+            os.chmod(f, stat.S_IRWXU)

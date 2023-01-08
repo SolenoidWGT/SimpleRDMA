@@ -44,21 +44,21 @@ int main() {
 	CUDACHECK(
 	    cudaMemcpy((void*)sendbuff_host[0], (void*)sendbuff_cuda[0], size * sizeof(float), cudaMemcpyDeviceToHost));
 	// H2D
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
 	for (int i = 0; i < 100; i++) {
 		CUDACHECK(
 		    cudaMemcpy((void*)sendbuff_cuda[0], (void*)sendbuff_host[0], size * sizeof(float), cudaMemcpyHostToDevice));
 	}
-	clock_gettime(CLOCK_MONOTONIC, &end);
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
 	long long usetime = (end.tv_sec * 1000000000 + end.tv_nsec) - (now.tv_sec * 1000000000 + now.tv_nsec);
 	printf("H2D-[%ld]B time use %.4f ms\n", size * sizeof(float), 1.0 * usetime / (1.0 * 1000 * 1000 * 100));
 
 	// D2H
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
 	for (int i = 0; i < 100; i++) {
 		CUDACHECK(cudaMemcpy(sendbuff_host[0], sendbuff_cuda[0], size * sizeof(float), cudaMemcpyDeviceToHost));
 	}
-	clock_gettime(CLOCK_MONOTONIC, &end);
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
 	long long usetime2 = (end.tv_sec * 1000000000 + end.tv_nsec) - (now.tv_sec * 1000000000 + now.tv_nsec);
 	printf("D2H-[%ld]B time use %.4f ms\n", size * sizeof(float), 1.0 * usetime2 / (1.0 * 1000 * 1000 * 100));
 	printf("all time %.4f ms\n", (1.0 * usetime2 + 1.0 * usetime) / (1.0 * 1000 * 1000 * 100));

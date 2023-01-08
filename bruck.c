@@ -233,8 +233,8 @@ testResult_t bruckCPU(void* sendbuff, void* recvbuff, void* tmpBuffer, size_t co
 		// NCCLCHECK(ncclSend(tmpBuffer, blockNeedSend * count, type, nextRingPeer, comm, stream));
 		// NCCLCHECK(ncclRecv(recvbuff, blockNeedSend * count, type, preRingPeer, comm, stream));
 		// NCCLCHECK(ncclGroupEnd());
-		IBSendRecvP2P(nRanks, rank, tmpBuffer, recvbuff, nextRingPeer, preRingPeer,
-		              blockNeedSend * count * wordSize(type));
+		// IBSendRecvP2P(nRanks, rank, tmpBuffer, recvbuff, nextRingPeer, preRingPeer,
+		//               blockNeedSend * count * wordSize(type));
 
 		// cudaStreamSynchronize(stream);
 
@@ -773,7 +773,7 @@ int all2AllBruck(int rank, int nRanks, int localRank, size_t msgSize, size_t all
 		log("All2AllType: %d", all2all_T);
 		for (int j = 0; j < REPEAT; j++) {
 			sock_barrier(nRanks, rank);
-			clock_gettime(CLOCK_MONOTONIC, &time1);
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time1);
 			switch (all2all_T) {
 			case BRUCK_NCCL:
 				bruckNCCL(sendbuff, recvbuff, tmpBuffer, count, ncclFloat, (ncclRedOp_t)0, 0, comm, s, false, j, s_send,
@@ -798,7 +798,7 @@ int all2AllBruck(int rank, int nRanks, int localRank, size_t msgSize, size_t all
 				cudaStreamSynchronize(s);
 				break;
 			}
-			clock_gettime(CLOCK_MONOTONIC, &time2);
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time2);
 			diffInNanos += (time2.tv_sec - time1.tv_sec) * (long)1e9 + (time2.tv_nsec - time1.tv_nsec);
 
 			if (j == REPEAT - 1 && all2all_T != BRUCK_NCCL)
@@ -832,9 +832,9 @@ int all2AllBruck(int rank, int nRanks, int localRank, size_t msgSize, size_t all
 			sock_barrier(nRanks, rank);
 			if (rank == 0 || rank == 8) {
 				int remote_peer = (rank == 0) ? 8 : 0;
-				clock_gettime(CLOCK_MONOTONIC, &time1);
+				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time1);
 				ncclSendRecv(sendbuff, recvbuff, p2p_count, ncclFloat, comm, s, rank, nRanks, remote_peer);
-				clock_gettime(CLOCK_MONOTONIC, &time2);
+				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time2);
 				diffInNanos += (time2.tv_sec - time1.tv_sec) * (long)1e9 + (time2.tv_nsec - time1.tv_nsec);
 			}
 		}

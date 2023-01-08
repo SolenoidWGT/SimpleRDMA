@@ -52,11 +52,14 @@ void free_numa(void* addr) {
 struct ExcMRArgs {
 	struct IBMemInfo* mr_ptr;
 	bool is_server;
+	bool is_meta_mr;
 };
 
 void* sock_exchange_MR(void* args) {
+	bool is_meta_mr = ((struct ExcMRArgs*)args)->is_meta_mr;
 	bool is_server = ((struct ExcMRArgs*)args)->is_server;
 	struct IBMemInfo* mr_ptr = ((struct ExcMRArgs*)args)->mr_ptr;
+	struct MRinfo* recv_mr;
 	int mr_id = mr_ptr->mr_id;
 	int ret = 0, i = 0;
 	int nRanks = config_info.nRanks;
@@ -87,21 +90,24 @@ void* sock_exchange_MR(void* args) {
 
 	for (i = start; i < end; i++) {
 		if (i != rank) {
+			if (is_meta_mr)
+				recv_mr = &(ib_res.remote_meta_recv_mr_info[i]);
+			else
+				recv_mr = &(ib_res.remote_mr_info[i][mr_id]);
+
 			ret = -1;
 			// while (ret != 0) {
-			ret = sock_get_MR_info(peer_sockfd[i], &(ib_res.remote_mr_info[i][mr_id]));
+			ret = sock_get_MR_info(peer_sockfd[i], recv_mr);
 			// usleep(1000);
 			//}
 			// CHECK(ret == 0, "Failed to get mr_info[%d] from server", i);
 
-			if (ib_res.remote_mr_info[i][mr_id].addr == NULL || ib_res.remote_mr_info[i][mr_id].length == 0 ||
-			    ib_res.remote_mr_info[i][mr_id].rkey == 0) {
+			if (recv_mr->addr == NULL || recv_mr->length == 0 || recv_mr->rkey == 0) {
 				log("ERROR! \"%s\" sock_get_MR_info NULL", info_str);
 			}
 #ifdef DEBUG_IB
-			log("\"%s\": Remote Rank-[%d] mr info addr:%p, length:%ld, rkey: %u", info_str, i,
-			    ib_res.remote_mr_info[i][mr_id].addr, ib_res.remote_mr_info[i][mr_id].length,
-			    ib_res.remote_mr_info[i][mr_id].rkey);
+			log("\"%s\": Remote Rank-[%d] mr info addr:%p, length:%ld, rkey: %u", info_str, i, recv_mr->addr,
+			    recv_mr->length, recv_mr->rkey);
 #endif
 		}
 	}
@@ -229,18 +235,25 @@ int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo*
 	/* the recv buffer occupies the first half while the sending buffer */
 	/* occupies the second half */
 	/* assume all msgs are of the same content */
+	int flag = (IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 	CHECK(buffer != NULL, "Failed to allocate mr.addr");
 	memset(buffer, 0, size);
 
-	*mr = ibv_reg_mr(ib_res.pd, (void*)buffer, size,
-	                 IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
+	if (use_pcie_relaxed_order) {
+		// https://lore.kernel.org/linux-rdma/20191119192919.GA16030@ziepe.ca/T/
+		// The new function would check against the kernel whether relaxed ordering is supported or not, and disable it
+		// if necessary.
+		flag |= IBV_ACCESS_RELAXED_ORDERING;
+		*mr = ibv_reg_mr_iova2(ib_res.pd, (void*)buffer, size, (uint64_t)buffer, flag);
+	} else {
+		*mr = ibv_reg_mr(ib_res.pd, (void*)buffer, size, flag);
+	}
 	CHECK(*mr != NULL, "Failed to register mr");
 
 	if (mrInfo != NULL) {
 		mrInfo->addr = (*mr)->addr;
 		mrInfo->length = (*mr)->length;
 		mrInfo->rkey = (*mr)->rkey;
-
 		log("Local mr info addr:%p, length:%ld, rkey: %u", mrInfo->addr, mrInfo->length, mrInfo->rkey);
 	}
 
@@ -249,15 +262,17 @@ error:
 	return -1;
 }
 
-int exchange_mr_info(struct IBMemInfo* mr_ptr) {
+int exchange_mr_info(struct IBMemInfo* mr_ptr, bool is_meta) {
 	struct ExcMRArgs arg1, arg2;
 	arg1.mr_ptr = mr_ptr;
 	arg1.is_server = true;
+	arg1.is_meta_mr = is_meta;
 	CHECK(pthread_create(&sock_server_t, NULL, sock_exchange_MR, (void*)(&arg1)) == 0,
 	      "sock_exchange_MR thread create error");
 
 	arg2.mr_ptr = mr_ptr;
 	arg2.is_server = false;
+	arg2.is_meta_mr = is_meta;
 	sock_exchange_MR((void*)(&arg2));
 
 	pthread_join(sock_server_t, NULL);
@@ -277,53 +292,39 @@ error:
 	return;
 }
 
-int setup_ib_buffer(int nRanks, int nDevs) {
-	ib_res.send_mr_info = (struct IBMemInfo*)calloc_numa(nRanks * sizeof(struct IBMemInfo));
-	ib_res.recv_mr_info = (struct IBMemInfo*)calloc_numa(nRanks * sizeof(struct IBMemInfo));
-	ib_res.remote_mr_info = (struct MRinfo**)calloc_numa(nRanks * sizeof(struct MRinfo*));
+int setup_ib_buffer(int mr_nums, int nDevs) {
+	ib_res.send_mr_info = (struct IBMemInfo*)calloc_numa(mr_nums * sizeof(struct IBMemInfo));
+	ib_res.recv_mr_info = (struct IBMemInfo*)calloc_numa(mr_nums * sizeof(struct IBMemInfo));
+	ib_res.remote_meta_recv_mr_info = (struct MRinfo*)calloc_numa(mr_nums * sizeof(struct MRinfo));
+	ib_res.remote_mr_info = (struct MRinfo**)calloc_numa(mr_nums * sizeof(struct MRinfo*));
+
 	for (int i = 0; i < nDevs; i++) {
 		ib_res.remote_mr_info[i] = (struct MRinfo*)calloc_numa(sizeof(struct MRinfo));
 	}
-	ib_res.mr_nums = nRanks;
+	ib_res.mr_nums = mr_nums;
 	// ib_res.remote_mr_nums = 0;
+	ib_res.wc = (struct ibv_wc*)calloc_numa(MAX_WC_NUMS * sizeof(struct ibv_wc));
 	return 0;
 }
 
-int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff) {
+int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff, bool is_meta, size_t buff_size) {
 	/* init remote mr */
-	size_t buff_size = config_info.msg_size * config_info.num_concurr_msgs * ib_res.num_qps;
 	CHECK(buff != NULL, "Failed to allocate remote mr info");
 	buff->mr_id = 0;
 
 	/* register mr */
-	if (numa_available() == 0 && numa_num_configured_nodes() > 1) {
-#ifdef DEBUG_IB
-		log("NUMA is Enable!");
-#endif
-		buff->addr = (char*)numa_alloc_onnode(buff_size, local_node);
-	} else {
-		// buff->addr = (char*)malloc(buff_size);
-		buff->addr = (char*)memalign(4096, buff_size);
-	}
+	// 	if (numa_available() == 0 && numa_num_configured_nodes() > 1) {
+	// #ifdef DEBUG_IB
+	// 		log("NUMA is Enable!");
+	// #endif
+	// 		buff->addr = (char*)numa_alloc_onnode(buff_size, local_node);
+	// 	} else {
+	buff->addr = (char*)memalign(4096, buff_size);
+	//}
 
 	CHECK(register_ib_mr(buff->addr, buff_size, &(buff->mr), &(buff->mr_info)) == 0, "mr");
-	CHECK(exchange_mr_info(buff) == 0, "mr exchange");
+	CHECK(exchange_mr_info(buff, is_meta) == 0, "mr exchange");
 
-	// Pre post recv.
-	// char* buf_ptr = ib_res.recv_mr_info[0].addr;
-	// char* buf_base = buf_ptr;
-	// size_t buf_offset = 0;
-	// size_t msg_size = config_info.msg_size;
-	// uint32_t lkey = ib_res.recv_mr_info[0].mr->lkey;
-	// for (i = 0; i < nRanks; i++) {
-	// 	if (i != rank) {
-	// 		for (j = 0; j < config_info.num_concurr_msgs; j++) {
-	// 			ret = post_srq_recv(msg_size, lkey, (uint64_t)buf_ptr, ib_res.srq, buf_ptr);
-	// 			buf_offset = (buf_offset + msg_size) % buff_size;
-	// 			buf_ptr = buf_base + buf_offset;
-	// 		}
-	// 	}
-	// }
 	log("IB setup MR success!");
 	return 0;
 error:
@@ -399,8 +400,8 @@ int setup_ib(int nRanks) {
 	qp_init_attr.send_cq = ib_res.cq;
 	qp_init_attr.recv_cq = ib_res.cq;
 	qp_init_attr.srq = ib_res.srq;
-	qp_init_attr.cap.max_send_wr = 128;
-	qp_init_attr.cap.max_recv_wr = 64;
+	qp_init_attr.cap.max_send_wr = MAX_WC_NUMS;
+	qp_init_attr.cap.max_recv_wr = MAX_WC_NUMS;
 	qp_init_attr.cap.max_send_sge = 4;
 	qp_init_attr.cap.max_recv_sge = 1;
 	qp_init_attr.cap.max_inline_data = 60;
@@ -424,6 +425,22 @@ int setup_ib(int nRanks) {
 
 	exchange_qp_info();
 
+	/*
+	CHECK(alloc_ib_buffer(nRanks, &(ib_res.meta_recv_mr_info), true, nRanks * 1024 * 1024) == 0, "alloc ib buffer");
+	char* buf_ptr = ib_res.meta_recv_mr_info.addr;
+	char* buf_base = buf_ptr;
+	size_t buf_offset = 0;
+	size_t buff_size = ib_res.meta_recv_mr_info.mr->length;
+	size_t msg_size = buff_size / nRanks;
+	uint32_t lkey = ib_res.meta_recv_mr_info.mr->lkey;
+	for (int i = 0; i < nRanks; i++) {
+	    for (int j = 0; j < config_info.num_concurr_msgs; j++) {
+	        CHECK(post_srq_recv(msg_size, lkey, (uint64_t)buf_ptr, ib_res.srq, buf_ptr) == 0, "post_srq_recv");
+	        buf_offset = (buf_offset + msg_size) % buff_size;
+	        buf_ptr = buf_base + buf_offset;
+	    }
+	}
+	*/
 	sock_barrier(nRanks, rank);
 	log("IB setup QP success!");
 

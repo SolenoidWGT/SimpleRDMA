@@ -3,6 +3,7 @@
 
 #include "ib.h"
 #include <infiniband/verbs.h>
+#include <stdbool.h>
 
 #define CPU_NUMS 128
 #define SOCKET_NUMS 4
@@ -12,9 +13,11 @@
 #define POLLING_THREAD_ID 1
 #define SENDING_THREAD_ID 2
 
-#define WARMUP 2
-#define REPEAT 10
+#define WARMUP 50
+#define REPEAT 500
 #define REPEAT_TIME (WARMUP + REPEAT)
+#define MAX_WC_NUMS 1024 * 2
+#define MB (1 << 20)
 
 extern int local_node;
 extern int node_num;
@@ -61,9 +64,30 @@ struct IBRes {
 	// struct MRinfo local_recv_mr_info;
 	int mr_nums;
 	// int remote_mr_nums;
+	struct IBMemInfo meta_recv_mr_info;
+	struct MRinfo* remote_meta_recv_mr_info;
+
 	struct IBMemInfo* send_mr_info;
 	struct IBMemInfo* recv_mr_info;
 	struct MRinfo** remote_mr_info; // *nRanks
+
+	struct ibv_wc* wc;
+};
+
+struct ib_send_args {
+	// int send_peers;
+	int socket_nRanks;
+	int socket_rank;
+	// int dev_rank;
+	int dev_nRanks;
+
+	int block_size;
+	int loop_num;
+	size_t chunk_size;
+	bool need_barrier;
+	bool use_pcie_relaxed_order;
+	bool only_send;
+	bool imm_send;
 };
 
 extern struct IBRes ib_res;
@@ -71,6 +95,9 @@ volatile extern uint8_t* recv_all_flag;
 volatile extern uint8_t* send_all_flag;
 volatile extern uint8_t* polling_flag;
 // extern pthread_t ibv_polling_t;
+
+extern bool use_pcie_relaxed_order;
+extern size_t chunk_size;
 
 int setup_ib(int);
 void close_ib_connection();
@@ -84,7 +111,10 @@ void close_sock(int nRanks);
 int cal_numa_node(int locak_rank, int nRanks, int task_per_node);
 int sock_handshack(int nRanks, int rank);
 int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo* mrInfo);
-int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff);
-int setup_ib_buffer(int nRanks, int nDevs);
-int exchange_mr_info(struct IBMemInfo* mr_ptr);
+int alloc_ib_buffer(int nRanks, struct IBMemInfo* buff, bool is_meta, size_t buff_size);
+int setup_ib_buffer(int mr_nums, int nDevs);
+int exchange_mr_info(struct IBMemInfo* mr_ptr, bool is_meta);
+int post_recv_wr(int socket_rank, int socket_nRanks, int nDevs, size_t block_size);
+
+void* launch_send_single_thread(void* arg);
 #endif /*setup_ib.h*/

@@ -2,7 +2,6 @@
 #include "debug.h"
 #include <arpa/inet.h>
 #include <unistd.h>
-
 int modify_qp_to_rts(struct ibv_qp* qp, uint32_t target_qp_num, uint16_t target_lid) {
 	int ret = 0;
 
@@ -91,8 +90,8 @@ int post_srq_recv(uint32_t req_size, uint32_t lkey, uint64_t wr_id, struct ibv_s
 
 // uint32_t req_size, uint32_t lkey, uint64_t wr_id, uint32_t imm_data, struct ibv_qp *qp, char *buf
 
-int post_write_with_imm(uint32_t req_size, uint32_t lkey, uint64_t wr_id, uint32_t imm_data, struct ibv_qp* qp,
-                        char* buf, uint32_t rkey, void* remote_addr) {
+int post_write_imm(uint32_t req_size, uint32_t lkey, uint64_t wr_id, struct ibv_qp* qp, char* buf, uint32_t rkey,
+                   void* remote_addr, uint32_t imm_data) {
 	struct ibv_send_wr send_wr, *bad_wr = NULL;
 	struct ibv_sge sge;
 	int err = 0;
