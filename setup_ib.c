@@ -108,8 +108,8 @@ void* sock_exchange_MR(void* args) {
 				log("ERROR! \"%s\" sock_get_MR_info NULL", info_str);
 			}
 #ifdef DEBUG_IB
-			log("\"%s\": Remote Rank-[%d] mr info addr:%p, length:%ld, rkey: %u", info_str, i, recv_mr->addr,
-			    recv_mr->length, recv_mr->rkey);
+			log("\"%s\": Remote Rank-[%d] mr info addr:%p, length:%ld, rkey: %u, mr_id: %d", info_str, i, recv_mr->addr,
+			    recv_mr->length, recv_mr->rkey, mr_id);
 #endif
 		}
 	}
@@ -256,7 +256,7 @@ int register_ib_mr(void* buffer, size_t size, struct ibv_mr** mr, struct MRinfo*
 		mrInfo->addr = (*mr)->addr;
 		mrInfo->length = (*mr)->length;
 		mrInfo->rkey = (*mr)->rkey;
-		log("Local mr info addr:%p, length:%ld, rkey: %u", mrInfo->addr, mrInfo->length, mrInfo->rkey);
+		// log("Local mr info addr:%p, length:%ld, rkey: %u", mrInfo->addr, mrInfo->length, mrInfo->rkey);
 	}
 
 	return 0;

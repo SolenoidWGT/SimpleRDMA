@@ -8,4 +8,5 @@
 int all2AllBruck(int rank, int nRanks, int localRank, size_t msgSize, size_t all2all_size, double nic_flow_size);
 long IBSendRecvP2P(int nRanks, int rank, char* send_buff, char* recv_buff, int dst_peer, int src_peer, int msg_size);
 int all2AllBruck_nGPUs(int dev_nRanks, int nDevs, size_t block_size, int base, int socket_rank, int socket_nRanks);
+bool cmpAll2AllResult(BRUCK_TYPE* buff1, BRUCK_TYPE* buff2, int nRanks, int count, int rank);
 #endif

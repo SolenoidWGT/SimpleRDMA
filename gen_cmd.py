@@ -38,13 +38,13 @@ path = "/mnt/cache/wangguoteng.p/SimpleRDMA/"
 exec_bin = path + "rdma-tutorial"
 
 # SH-IDC1-10-140-0-31
-node_list = ["SZ-OFFICE2-172-20-21-185", "SZ-OFFICE2-172-20-21-189"]
-# node_list = ["SH-IDC1-10-140-0-149", "SH-IDC1-10-140-0-150"]
+# node_list = ["SZ-OFFICE2-172-20-21-185", "SZ-OFFICE2-172-20-21-189"]
+node_list = ["SH-IDC1-10-140-0-149", "SH-IDC1-10-140-0-150"]
 # node_list = ["SH-IDC1-10-140-0-31", "SH-IDC1-10-140-0-31"]
 # int((15 * 1024 * 1024) / (15*8))
 
 USE_NSYS = False
-NSYS_REPORT_NAME="ngpus-cpy-report"
+NSYS_REPORT_NAME="ngpus-new-pcie-report"
 if USE_NSYS:
     nsys = "/mnt/petrelfs/caifcicd/dev/nsys/opt/nvidia/nsight-systems/2022.3.4/bin/nsys profile --stats=true --force-overwrite=true  --trace=cuda  --sample=cpu -o {}".format(NSYS_REPORT_NAME)
 else:
@@ -54,7 +54,9 @@ p2p=True
 if p2p:
     nRanks = 2
     taskPerNode = [1, 1]
-    msg_size = int((2 * 1024 * 1024))
+    msg_size = int(4)
+    # print("msg_size: {} MB".format(msg_size/1024.0/1024.0))
+    print("msg_size: {} B".format(msg_size))
 else:
     nRanks = 16
     taskPerNode = [8, 8]
@@ -68,13 +70,14 @@ else:
     # ibverbs all2all
     # x = msg_size * 15 * 8
     msg_size = int(16 * 1024 * 1024 / 120)
+    print("msg_size: {} MB".format(msg_size/1024.0/1024.0))
     
 
 nodeNum = len(node_list)
 rank = 0
 
 
-print("msg_size: {} MB".format(msg_size/1024.0/1024.0))
+
 if __name__ == "__main__":
     if not USE_BASH:
         with open("ib_launch.conf", "w") as fb:

@@ -129,14 +129,21 @@ void do_setaffinity(int tid, int cpu) {
 	// if (cpu == -1)
 	// 	cpu = get_cpu_for_rank(locak_rank, nRanks, tid, local_node);
 
-	for (int i = 4 * tid; i < (4 * tid + 4); i++) {
-		CPU_SET(node_list[0].cpu_numa_list[i], &mask);
+	if (cpu == -1) {
+		for (int i = 3 * tid; i < (3 * tid + 3); i++) {
+			CPU_SET(node_list[0].cpu_numa_list[i], &mask);
+			log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node,
+			    node_list[0].cpu_numa_list[i]);
+		}
+	} else {
+		CPU_SET(cpu, &mask);
+		log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node, cpu);
 	}
 
 	if (sched_setaffinity(0, sizeof(mask), &mask) == -1) {
 		log_warn("warning: could not set CPU affinity, continuing...\n");
 	}
-	log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node, cpu);
+	// log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node, cpu);
 }
 
 // struct ibv_mr* (*ibv_internal_reg_mr_iova2)(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access);
@@ -157,9 +164,9 @@ int main(int argc, char* argv[]) {
 	bool use_chunk = false;
 	int nDevs = 8;
 	local_node = 0;
-	use_pcie_relaxed_order = false;
+	use_pcie_relaxed_order = check_pcie_relaxed_ordering_compliant();
 	get_cpu_mask();
-	do_setaffinity(MAIN_THREAD_ID, -1);
+	do_setaffinity(MAIN_THREAD_ID, 3);
 
 	// return 0;
 

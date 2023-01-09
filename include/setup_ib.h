@@ -88,6 +88,7 @@ struct ib_send_args {
 	bool use_pcie_relaxed_order;
 	bool only_send;
 	bool imm_send;
+	bool is_p2p;
 };
 
 extern struct IBRes ib_res;
