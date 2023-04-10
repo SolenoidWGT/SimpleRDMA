@@ -8,7 +8,7 @@
 
 # srun --partition=caif_rd  -w SH-IDC1-10-140-0-178 --preempt ./0_ib_launch.conf
 # srun --partition=caif_rd  -w SH-IDC1-10-140-0-207 --preempt ./1_ib_launch.conf
-# export LD_LIBRARY_PATH=/mnt/cache/wangguoteng.p/nccl/build_master/lib:/mnt/cache/wangguoteng.p/SimpleRDMA/lib:/mnt/cache/share/cuda-11.3/lib64 
+# export LD_LIBRARY_PATH=/mnt/cache/wangguoteng.p/nccl/build_master/lib:/mnt/cache/wangguoteng.p/SimpleRDMA/lib:/mnt/cache/share/cuda-11.3/lib64:/mnt/cache/wangguoteng.p/SimpleRDMA/pciutils/lib:/mnt/cache/share/openmpi-2.1.1/lib:/mnt/cache/wangguoteng.p/numactl/build/usr/local/lib
 import os
 import stat
 # 2052096
@@ -39,11 +39,11 @@ exec_bin = path + "rdma-tutorial"
 
 # SH-IDC1-10-140-0-31
 # node_list = ["SZ-OFFICE2-172-20-21-185", "SZ-OFFICE2-172-20-21-189"]
-node_list = ["SH-IDC1-10-140-0-149", "SH-IDC1-10-140-0-150"]
+node_list = ["SH-IDC1-10-140-24-137", "SH-IDC1-10-140-24-138"]
 # node_list = ["SH-IDC1-10-140-0-31", "SH-IDC1-10-140-0-31"]
 # int((15 * 1024 * 1024) / (15*8))
 
-USE_NSYS = False
+USE_NSYS = True
 NSYS_REPORT_NAME="ngpus-new-pcie-report"
 if USE_NSYS:
     nsys = "/mnt/petrelfs/caifcicd/dev/nsys/opt/nvidia/nsight-systems/2022.3.4/bin/nsys profile --stats=true --force-overwrite=true  --trace=cuda  --sample=cpu -o {}".format(NSYS_REPORT_NAME)
@@ -54,7 +54,7 @@ p2p=True
 if p2p:
     nRanks = 2
     taskPerNode = [1, 1]
-    msg_size = int(4)
+    msg_size = int(16*1024*1024)
     # print("msg_size: {} MB".format(msg_size/1024.0/1024.0))
     print("msg_size: {} B".format(msg_size))
 else:

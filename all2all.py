@@ -5,7 +5,7 @@ import time
 import argparse
 import os
 
-init_method="tcp://10.140.0.180:12347"
+init_method="tcp://10.140.24.143:12347"
 world_size = 16
 
 def shape2ByteSize(tensor):

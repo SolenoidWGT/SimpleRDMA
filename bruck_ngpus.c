@@ -49,12 +49,18 @@ struct All2AllInfo {
 	BRUCK_TYPE** dev_sendbuff_gather;
 	BRUCK_TYPE** dev_recvbuff_gather;
 
+	BRUCK_TYPE** dev_sendbuff_scatter;
+	BRUCK_TYPE** dev_recvbuff_scatter;
+
+	BRUCK_TYPE** dev_recvbuff_rank0rank1;
+
 	cudaStream_t* streams;
-
 	cudaStream_t* streams_gather;
-	ncclComm_t* comms;
+	cudaStream_t* streams_scatter;
 
+	ncclComm_t* comms;
 	ncclComm_t* comms_gather;
+	ncclComm_t* comms_scatter;
 };
 
 int post_recv_wr(int socket_rank, int socket_nRanks, int nDevs, size_t block_size) {
@@ -230,6 +236,28 @@ testResult_t initData_n(struct All2AllInfo* info) {
 	return testSuccess;
 }
 
+testResult_t cmpDevResult(BRUCK_TYPE* buff1, BRUCK_TYPE* buff2, int nRanks, int count, int rank) {
+	int i, j, re1 = 0, re2 = 0;
+	int size = nRanks * count * sizeof(BRUCK_TYPE);
+	BRUCK_TYPE* buff1_h = (BRUCK_TYPE*)malloc(size);
+	BRUCK_TYPE* buff2_h = (BRUCK_TYPE*)malloc(size);
+	CUDACHECK(cudaMemcpy(buff1_h, buff1, size, cudaMemcpyDeviceToHost));
+	CUDACHECK(cudaMemcpy(buff2_h, buff2, size, cudaMemcpyDeviceToHost));
+
+	for (i = 0; i < nRanks * count; i++) {
+		re1 += (int)buff1_h[i];
+		re2 += (int)buff2_h[i];
+	}
+
+	free(buff1_h);
+	free(buff2_h);
+#ifdef BRUCK_DEBUG
+	printf("expected:%d, re1:%d, re2: %d\n", expected[rank], re1, re2);
+#endif
+
+	return (re2 == re1) ? testSuccess : testInternalError;
+}
+
 int allocHostBuff(struct All2AllInfo* info, struct IBMemInfo* buff) {
 	// struct IBMemInfo* buff = (struct IBMemInfo*)calloc_numa(info->nDevs * sizeof(struct IBMemInfo));
 	for (int i = 0; i < info->nDevs; i++) {
@@ -257,16 +285,25 @@ testResult_t allocCudaBuff(struct All2AllInfo* info) {
 	info->dev_sendbuff_gather = (BRUCK_TYPE**)calloc_numa(info->nDevs * sizeof(BRUCK_TYPE*));
 	info->dev_recvbuff_gather = (BRUCK_TYPE**)calloc_numa(info->nDevs * sizeof(BRUCK_TYPE*));
 
+	info->dev_sendbuff_scatter = (BRUCK_TYPE**)calloc_numa(info->nDevs * sizeof(BRUCK_TYPE*));
+	info->dev_recvbuff_scatter = (BRUCK_TYPE**)calloc_numa(info->nDevs * sizeof(BRUCK_TYPE*));
+
+	info->dev_recvbuff_rank0rank1 = (BRUCK_TYPE**)calloc_numa(info->nDevs * sizeof(BRUCK_TYPE*));
+
 	for (int i = 0; i < info->nDevs; i++) {
 		CUDACHECK(cudaSetDevice(i));
 		CUDACHECK(cudaStreamCreate(info->streams + i));
 		CUDACHECK(cudaStreamCreate(info->streams_gather + i));
+		CUDACHECK(cudaStreamCreate(info->streams_scatter + i));
 		CUDACHECK(cudaMalloc((void**)info->dev_sendbuff + i, info->buff_size));
 		CUDACHECK(cudaMalloc((void**)info->dev_recvbuff + i, info->buff_size));
 		CUDACHECK(cudaMalloc((void**)info->result_cmp_buff + i, info->buff_size));
 
-		CUDACHECK(cudaMalloc((void**)info->dev_sendbuff_gather + i, info->block_size * 2));
-		CUDACHECK(cudaMalloc((void**)info->dev_recvbuff_gather + i, info->block_size * 2));
+		CUDACHECK(cudaMalloc((void**)info->dev_sendbuff_gather + i, info->buff_size));
+		CUDACHECK(cudaMalloc((void**)info->dev_recvbuff_gather + i, info->buff_size)); // dev_recvbuff_rank0rank1
+		CUDACHECK(cudaMalloc((void**)info->dev_sendbuff_scatter + i, info->buff_size));
+		CUDACHECK(cudaMalloc((void**)info->dev_recvbuff_scatter + i, info->buff_size)); // dev_recvbuff_rank0rank1
+		CUDACHECK(cudaMalloc((void**)info->dev_recvbuff_rank0rank1 + i, info->buff_size));
 
 		// CUDACHECK(cudaMemset(info->dev_sendbuff[i], 0, info->buff_size));
 		CUDACHECK(cudaMemset(info->dev_recvbuff[i], 0, info->buff_size));
@@ -276,11 +313,13 @@ testResult_t allocCudaBuff(struct All2AllInfo* info) {
 	return testSuccess;
 }
 
-testResult_t initBuff(struct All2AllInfo* info) {
-	allocHostBuff(info, ib_res.recv_mr_info);
-	allocHostBuff(info, ib_res.send_mr_info);
-	info->host_sendbuff = ib_res.send_mr_info;
-	info->host_recvbuff = ib_res.recv_mr_info;
+testResult_t initBuff(struct All2AllInfo* info, bool alloc_host_buff) {
+	if (alloc_host_buff) {
+		allocHostBuff(info, ib_res.recv_mr_info);
+		allocHostBuff(info, ib_res.send_mr_info);
+		info->host_sendbuff = ib_res.send_mr_info;
+		info->host_recvbuff = ib_res.recv_mr_info;
+	}
 
 	allocCudaBuff(info);
 	// error:
@@ -323,6 +362,9 @@ testResult_t ngpu_async_gpu_mem_DeviceToHost(struct All2AllInfo* info, enum cuda
 }
 
 void dumpData(BRUCK_TYPE* buff, int rank, int totalCount, const char* name, bool isCuda) {
+	if (totalCount > 16)
+		return;
+
 	fprintf(stderr, "Rank-[%d], %s:[", rank, name);
 	BRUCK_TYPE* hostbuffer;
 	hostbuffer = (BRUCK_TYPE*)malloc(totalCount * sizeof(BRUCK_TYPE));
@@ -339,176 +381,8 @@ void dumpData(BRUCK_TYPE* buff, int rank, int totalCount, const char* name, bool
 }
 
 volatile bool start_flag = false;
-pthread_t ibv_proxy_t, ibv_proxy_t_2;
+pthread_t ibv_proxy_t, ibv_proxy_t_2, ibv_proxy_t_3;
 #define PCEIE_DEBUG 1
-testResult_t all2all_pcie_origin(void* args) {
-	do_setaffinity(POLLING_THREAD_ID, 4);
-
-	struct All2AllInfo* info = (struct All2AllInfo*)args;
-	int local_base_rank = info->base;
-	int remote_base_rank = info->base == 0 ? 8 : 0;
-
-	size_t count = info->count_per_block;
-	size_t rankOffset = info->block_size;
-
-	// intra comm
-	NCCLCHECK(ncclGroupStart());
-	for (int j = 0; j < info->nDevs; j++) {
-		int start, end;
-
-		cudaStream_t s = info->streams[j];
-		ncclComm_t comm = info->comms[j];
-		char* sendbuff = (char*)info->dev_sendbuff[j];
-		char* recvbuff = (char*)info->dev_recvbuff[j];
-		for (int r = local_base_rank; r < local_base_rank + 8; r++) {
-			log("Kernel1: Rank-[%d], send/recv, block:[%d], with:[%d]", info->base + j, r, r);
-			NCCLCHECK(ncclSend(sendbuff + r * info->block_size, count, ncclFloat, r, comm, s));
-			NCCLCHECK(ncclRecv(recvbuff + r * info->block_size, count, ncclFloat, r, comm, s));
-		}
-		if (j == 6 || j == 7) {
-			start = remote_base_rank;
-			end = remote_base_rank + 8;
-			// NCCLCHECK(ncclSend(recvbuff + (remote_base_rank + 7) * info->block_size, count, ncclFloat,
-			// (remote_base_rank + 7), comm, s));
-		} else {
-			start = remote_base_rank + 6;
-			end = remote_base_rank + 8;
-		}
-		for (int r = start; r < end; r++) {
-			log("Kernel1: Rank-[%d], send/recv, block:[%d], with:[%d]", info->base + j, r, r);
-			NCCLCHECK(ncclSend(sendbuff + r * info->block_size, count, ncclFloat, r, comm, s));
-			NCCLCHECK(ncclRecv(recvbuff + r * info->block_size, count, ncclFloat, r, comm, s));
-		}
-
-		if (j != 0 && j != 1) {
-			start = remote_base_rank + 2;
-			end = remote_base_rank + 6;
-			for (int r = start; r < end; r++) {
-				log("Kernel1: Rank-[%d], send/recv, block:[%d], with:[%d]", info->base + j, r, r);
-				NCCLCHECK(ncclSend(sendbuff + r * info->block_size, count, ncclFloat, r, comm, s));
-				NCCLCHECK(ncclRecv(recvbuff + r * info->block_size, count, ncclFloat, r, comm, s));
-			}
-		}
-	}
-	memory_barrier();
-	while (start_flag == false)
-		;
-	NCCLCHECK(ncclGroupEnd());
-
-	for (int i = 0; i < info->nDevs; i++) {
-		CUDACHECK(cudaStreamSynchronize(info->streams[i]));
-		// log("stream:[%d] sync over", i);
-	}
-
-	return testSuccess;
-}
-
-testResult_t all2all_pcie_dierct(void* args) {
-	do_setaffinity(POLLING_THREAD_ID + 1, 5);
-
-	struct All2AllInfo* info = (struct All2AllInfo*)args;
-	int local_base_rank = info->base;
-	int remote_base_rank = (info->base + info->nDevs) % info->nRanks;
-	int part = 6;
-
-	// double chunk_size = (double)info->block_size / (double)part;
-	// size_t unit_size = (size_t)floor(chunk_size);
-	// size_t special_size = info->block_size - (unit_size * (part - 1));
-
-	size_t count = info->count_per_block;
-	size_t rankOffset = info->block_size;
-	// gather kernel
-	NCCLCHECK(ncclGroupStart());
-	for (int j = 0; j < info->nDevs; j++) {
-		cudaStream_t s_g = info->streams_gather[j];
-		ncclComm_t comm = info->comms_gather[j];
-		char* sendbuff = (char*)info->dev_sendbuff[j];
-		char* gather_sendbuff = (char*)info->dev_sendbuff_gather[j];
-
-		if (j == 0 || j == 1) {
-			// for base == 0, r:[2:7]
-			// for base == 8, r:[10:15]
-			for (int r = local_base_rank + 2, p = 0; r < local_base_rank + 8; r++, p++) {
-				log("Kernel2: Rank-[%d], send, block:[%d], to:[%d]", info->base + j, r, r);
-				NCCLCHECK(ncclSend(sendbuff + p * info->block_size, count, ncclFloat, r, comm, s_g));
-			}
-		} else {
-			for (int k = local_base_rank, p = 0; k < local_base_rank + 2; k++, p++) {
-				log("Kernel2: Rank-[%d], recv, block:[%d], from:[%d]", info->base + j, k, k);
-				NCCLCHECK(ncclRecv(gather_sendbuff + p * info->block_size, count, ncclFloat, k, comm, s_g));
-			}
-		}
-	}
-	memory_barrier();
-	while (start_flag == false)
-		;
-	NCCLCHECK(ncclGroupEnd());
-
-	// sync
-	for (int i = 0; i < info->nDevs; i++) {
-		CUDACHECK(cudaStreamSynchronize(info->streams_gather[i]));
-	}
-
-	// inter comm kernel
-	int selfb = info->base == 0 ? 14 : 6;
-	NCCLCHECK(ncclGroupStart());
-	for (int j = 0; j < info->nDevs; j++) {
-		cudaStream_t s = info->streams_gather[j];
-		ncclComm_t comm = info->comms_gather[j];
-		char* gather_sendbuff = (char*)info->dev_sendbuff_gather[j];
-		char* gather_recvbuff = (char*)info->dev_recvbuff_gather[j];
-		int direct_peer = info->base == 0 ? j + 8 : j;
-		if (j != 0 && j != 1) {
-
-			log("Kernel2: Rank-[%d], send/recv 2 blocks in gather buffer, with:[%d]", info->base + j, direct_peer);
-			NCCLCHECK(ncclSend(gather_sendbuff, count * 2, ncclFloat, direct_peer, comm, s));
-			NCCLCHECK(ncclRecv(gather_recvbuff, count * 2, ncclFloat, direct_peer, comm, s));
-		}
-	}
-	NCCLCHECK(ncclGroupEnd());
-
-	// sync
-	for (int i = 0; i < info->nDevs; i++) {
-		CUDACHECK(cudaStreamSynchronize(info->streams_gather[i]));
-	}
-
-	// scatter kernel
-	NCCLCHECK(ncclGroupStart());
-	for (int j = 0; j < info->nDevs; j++) {
-		cudaStream_t s_g = info->streams_gather[j];
-		ncclComm_t comm = info->comms_gather[j];
-		// char* sendbuff = (char*)info->dev_sendbuff[j];
-		char* recvbuff = (char*)info->dev_recvbuff[j];
-
-		char* gather_sendbuff = (char*)info->dev_sendbuff_gather[j];
-		char* gather_recvbuff = (char*)info->dev_recvbuff_gather[j];
-
-		if (j == 0 || j == 1) {
-			// for base == 0, r:[2:7]
-			// for base == 8, r:[10:15]
-			for (int r = local_base_rank + 2, p = 0; r < local_base_rank + 8; r++, p++) {
-				log("Kernel2: Rank-[%d], recv, block:[%d], from:[%d]", info->base + j, r, r);
-				NCCLCHECK(ncclRecv(recvbuff + p * info->block_size, count, ncclFloat, r, comm, s_g));
-			}
-		} else {
-			for (int k = local_base_rank, p = 0; k < local_base_rank + 2; k++, p++) {
-				log("Kernel2: Rank-[%d], send, block:[%d], to:[%d]", info->base + j, k, k);
-				NCCLCHECK(ncclSend(gather_recvbuff + p * info->block_size, count, ncclFloat, k, comm, s_g));
-			}
-		}
-	}
-
-	memory_barrier();
-	while (start_flag == false)
-		;
-
-	NCCLCHECK(ncclGroupEnd());
-	for (int i = 0; i < info->nDevs; i++) {
-		CUDACHECK(cudaStreamSynchronize(info->streams_gather[i]));
-		// log("gather stream:[%d] sync over", i);
-	}
-	return testSuccess;
-}
 
 typedef testResult_t (*test_fn)(struct All2AllInfo*);
 testResult_t test_cpy_d2h_8(struct All2AllInfo* info) {
@@ -517,6 +391,14 @@ testResult_t test_cpy_d2h_8(struct All2AllInfo* info) {
 }
 testResult_t test_cpy_h2d_8(struct All2AllInfo* info) {
 	ngpu_async_gpu_mem_DeviceToHost(info, cudaMemcpyHostToDevice, 8);
+	return testSuccess;
+}
+testResult_t test_cpy_d2h_2(struct All2AllInfo* info) {
+	ngpu_async_gpu_mem_DeviceToHost(info, cudaMemcpyDeviceToHost, 2);
+	return testSuccess;
+}
+testResult_t test_cpy_h2d_2(struct All2AllInfo* info) {
+	ngpu_async_gpu_mem_DeviceToHost(info, cudaMemcpyHostToDevice, 2);
 	return testSuccess;
 }
 testResult_t test_cpy_d2h_1(struct All2AllInfo* info) {
@@ -548,23 +430,26 @@ testResult_t test_all2all(struct All2AllInfo* info) {
 
 testResult_t test_all2all_new(struct All2AllInfo* info) {
 
-	CHECK(pthread_create(&ibv_proxy_t, NULL, (void* (*)(void*))all2all_pcie_origin, (void*)info) == 0,
-	      "create ib thread");
-	// CHECK(pthread_create(&ibv_proxy_t_2, NULL, (void* (*)(void*))all2all_pcie_dierct, (void*)info) == 0,
+	// CHECK(pthread_create(&ibv_proxy_t, NULL, (void* (*)(void*))all2all_pcie_origin, (void*)info) == 0,
 	//       "create ib thread");
-
+	// CHECK(pthread_create(&ibv_proxy_t_2, NULL, (void* (*)(void*))all2all_pcie_directSendRecv, (void*)info) == 0,
+	//       "create ib thread");
+	// CHECK(pthread_create(&ibv_proxy_t_3, NULL, (void* (*)(void*))all2all_pcie_rank0rank1_pypass, (void*)info) == 0,
+	//       "create ib thread");
 	usleep(500);
 	return testSuccess;
-error:
-	return testInternalError;
+	// error:
+	// 	return testInternalError;
 }
+
 testResult_t test_all2all_flag(struct All2AllInfo* info) {
 	memory_barrier();
 
 	start_flag = true;
 
-	pthread_join(ibv_proxy_t, NULL);
+	// pthread_join(ibv_proxy_t, NULL);
 	// pthread_join(ibv_proxy_t_2, NULL);
+	// pthread_join(ibv_proxy_t_3, NULL);
 	return testSuccess;
 }
 
@@ -573,7 +458,7 @@ testResult_t test_ib_send_recv_async(struct All2AllInfo* info) {
 
 	bool is_p2p = true;
 	if (is_p2p) {
-		args->loop_num = 10 * REPEAT;
+		args->loop_num = 30 * REPEAT;
 		args->dev_nRanks = 1;
 		args->block_size = info->buff_size;
 		args->is_p2p = true;
@@ -642,7 +527,8 @@ testResult_t loop_engine(struct All2AllInfo* info, test_fn fn, test_fn pre_fn) {
 			info->range[0][(int)(tt / (long)1e6) / 10]++;
 		}
 
-		initData_n(info);
+		// initData_n(info);
+		start_flag = false;
 	}
 
 	log("Base-[%d], nDevs-[%d], nRanks-[%d]", info->base, info->nDevs, info->nRanks);
@@ -693,6 +579,9 @@ error:
 
 int all2AllBruck_nGPUs(int dev_nRanks, int nDevs, size_t block_size, int base, int socket_rank, int socket_nRanks) {
 	// NCCL and CUDA stuff
+	int x;
+	ncclGetVersion(&x);
+	printf("%d\n", x);
 	struct All2AllInfo* info = (struct All2AllInfo*)calloc_numa(sizeof(struct All2AllInfo));
 
 	info->nDevs = nDevs;
@@ -708,9 +597,11 @@ int all2AllBruck_nGPUs(int dev_nRanks, int nDevs, size_t block_size, int base, i
 
 	info->streams = (cudaStream_t*)calloc_numa(sizeof(cudaStream_t) * nDevs);
 	info->streams_gather = (cudaStream_t*)calloc_numa(sizeof(cudaStream_t) * nDevs);
+	info->streams_scatter = (cudaStream_t*)calloc_numa(sizeof(cudaStream_t) * nDevs);
 
 	info->comms = (ncclComm_t*)calloc_numa(sizeof(ncclComm_t) * nDevs);
 	info->comms_gather = (ncclComm_t*)calloc_numa(sizeof(ncclComm_t) * nDevs);
+	info->comms_scatter = (ncclComm_t*)calloc_numa(sizeof(ncclComm_t) * nDevs);
 
 	info->max_times = (long*)calloc_numa(sizeof(long) * nDevs);
 	info->min_times = (long*)calloc_numa(sizeof(long) * nDevs);
@@ -730,15 +621,16 @@ int all2AllBruck_nGPUs(int dev_nRanks, int nDevs, size_t block_size, int base, i
 	log("buffer:[%.3lf]B, tbuffer:[%ld]B", (double)info->buff_size, info->total_buff_size);
 
 	// cudaSetDevice must call before cudaStreamCreate
-	CHECK(initBuff(info) == testSuccess, "buff init");
-	CHECK(initData_n(info) == testSuccess, "data init");
+	CHECK(initBuff(info, false) == testSuccess, "buff init");
+	// CHECK(initData_n(info) == testSuccess, "data init");
 
 	for (int i = 0; i < info->nDevs; i++) {
 		dumpData(info->dev_sendbuff[i], info->base + i, info->count_per_block * info->nRanks, "buff", true);
 	}
 
 	init_comms(info, info->comms);
-	init_comms(info, info->comms_gather);
+	// init_comms(info, info->comms_gather);
+	// init_comms(info, info->comms_scatter);
 
 	for (int i = 0; i < nDevs; i++) {
 		CUDACHECK(cudaSetDevice(i));
@@ -752,37 +644,40 @@ int all2AllBruck_nGPUs(int dev_nRanks, int nDevs, size_t block_size, int base, i
 	// test_ib_send_recv_async(info);
 	// sock_barrier(info->socket_nRanks, info->socket_rank);
 
-	test_all2all_new(info);
-	memory_barrier();
-	test_all2all_flag(info);
-	for (int i = 0; i < info->nDevs; i++) {
-		cudaMemcpy(info->result_cmp_buff[i], info->dev_recvbuff[i], info->buff_size, cudaMemcpyDeviceToDevice);
-	}
-	for (int i = 0; i < info->nDevs; i++) {
-		dumpData(info->result_cmp_buff[i], info->base + i, info->count_per_block * info->nRanks, "new", true);
-	}
-	CHECK(initData_n(info) == testSuccess, "data init");
-
-	test_all2all(info);
-
-	for (int i = 0; i < info->nDevs; i++) {
-		dumpData(info->dev_recvbuff[i], info->base + i, info->count_per_block * info->nRanks, "new", true);
-	}
-	for (int i = 0; i < info->nDevs; i++) {
-		if (cmpAll2AllResult(info->result_cmp_buff[i], info->dev_recvbuff[i], info->nRanks, info->count_per_block,
-		                     info->base + i)) {
-			log("Bruck all2all result is success!");
-		} else {
-			log("Bruck all2all result is failed!");
-		}
-	}
-
 	// loop_engine(info, test_all2all_flag, test_all2all_new);
+	/*
+	    test_all2all_new(info);
+	    memory_barrier();
+	    test_all2all_flag(info);
+	    for (int i = 0; i < info->nDevs; i++) {
+	        cudaMemcpy(info->result_cmp_buff[i], info->dev_recvbuff[i], info->buff_size, cudaMemcpyDeviceToDevice);
+	    }
+	    for (int i = 0; i < info->nDevs; i++) {
+	        dumpData(info->result_cmp_buff[i], info->base + i, info->count_per_block * info->nRanks, "new", true);
+	    }
+	    CHECK(initData_n(info) == testSuccess, "data init");
 
-	// loop_engine(info, test_cpy_d2h_1);
-	// loop_engine(info, test_cpy_h2d_1);
-	// loop_engine(info, test_cpy_d2h_8);
-	// loop_engine(info, test_cpy_h2d_8);
+	    test_all2all(info);
+
+	    for (int i = 0; i < info->nDevs; i++) {
+	        dumpData(info->dev_recvbuff[i], info->base + i, info->count_per_block * info->nRanks, "new", true);
+	    }
+	    for (int i = 0; i < info->nDevs; i++) {
+	        if (cmpDevResult(info->result_cmp_buff[i], info->dev_recvbuff[i], info->nRanks, info->count_per_block,
+	                         info->base + i) == testSuccess) {
+	            log("Bruck all2all dev[%d] result is success!", i);
+	        } else {
+	            log("Bruck all2all dev[%d] result is failed!", i);
+	        }
+	    }
+	*/
+
+	loop_engine(info, test_cpy_d2h_1, NULL);
+	loop_engine(info, test_cpy_h2d_1, NULL);
+	loop_engine(info, test_cpy_d2h_2, NULL);
+	loop_engine(info, test_cpy_h2d_2, NULL);
+	loop_engine(info, test_cpy_d2h_8, NULL);
+	loop_engine(info, test_cpy_h2d_8, NULL);
 	sock_barrier(info->socket_nRanks, info->socket_rank);
 	log("All pass!");
 	// CHECK(pthread_join(ibv_proxy_t, NULL) == 0, "join ib thread");

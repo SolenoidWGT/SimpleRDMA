@@ -14,7 +14,7 @@
 #define SENDING_THREAD_ID 2
 
 #define WARMUP 50
-#define REPEAT 500
+#define REPEAT 100
 #define REPEAT_TIME (WARMUP + REPEAT)
 #define MAX_WC_NUMS 1024 * 2
 #define MB (1 << 20)

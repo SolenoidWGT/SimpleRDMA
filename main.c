@@ -132,12 +132,12 @@ void do_setaffinity(int tid, int cpu) {
 	if (cpu == -1) {
 		for (int i = 3 * tid; i < (3 * tid + 3); i++) {
 			CPU_SET(node_list[0].cpu_numa_list[i], &mask);
-			log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node,
-			    node_list[0].cpu_numa_list[i]);
+			// log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node,
+			// node_list[0].cpu_numa_list[i]);
 		}
 	} else {
 		CPU_SET(cpu, &mask);
-		log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node, cpu);
+		// log("Rank-[%d], tid-[%d], set on Node-[%d]'s cpu-[%d]", rank, tid, local_node, cpu);
 	}
 
 	if (sched_setaffinity(0, sizeof(mask), &mask) == -1) {
@@ -148,7 +148,6 @@ void do_setaffinity(int tid, int cpu) {
 
 // struct ibv_mr* (*ibv_internal_reg_mr_iova2)(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access);
 int main(int argc, char* argv[]) {
-
 	int ret = 0;
 	config_info.num_concurr_msgs = 1;
 	config_info.nRanks = atoi(argv[1]);
@@ -202,8 +201,8 @@ int main(int argc, char* argv[]) {
 
 	/* connect QP */
 	CHECK(sock_handshack(nRanks, rank) == 0, "sock_handshack  error");
-	CHECK(setup_ib(config_info.nRanks) == 0, "Failed to setup IB");
-	CHECK(setup_ib_buffer(nDevs) == 0, "Setip ib");
+	// CHECK(setup_ib(config_info.nRanks) == 0, "Failed to setup IB");
+	// CHECK(setup_ib_buffer(nDevs) == 0, "Setip ib");
 
 	all2AllBruck_nGPUs(16, nDevs, msg_size, (rank == 0) ? 0 : 8, rank, nRanks);
 
